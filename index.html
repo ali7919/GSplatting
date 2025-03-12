@@ -1,129 +1,119 @@
 <!DOCTYPE html>
-<html>
-
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>JSFiddle wdn6vasc</title>
-
-  <style>
-    body,
-html {
-    margin: 0;
-    padding: 0;
-    overflow: hidden;
-    background-color: #000;
-}
-
-canvas {
-    width: 100vw;
-    height: 100vh;
-}
-
-dialog {
-    width: 100%;
-    text-align: center;
-    max-width: 20em;
-    color: white;
-    background-color: #000;
-    border: none;
-    position: relative;
-    transform: translate(-50%, -50%);
-}
-
-#progress-container {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-}
-
-progress {
-    width: 100%;
-    height: 1em;
-    border: none;
-    background-color: #fff;
-    color: #eee;
-}
-
-progress::-webkit-progress-bar {
-    background-color: #333;
-}
-
-progress::-webkit-progress-value {
-    background-color: #eee;
-}
-
-progress::-moz-progress-bar {
-    background-color: #eee;
-}
-
-  </style>
-
-  
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR Cube Example</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+        }
+        #ar-button {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            background: #4285f4;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            z-index: 999;
+        }
+        #ar-button:disabled {
+            background-color: #ccc;
+            color: #666;
+            cursor: not-allowed;
+        }
+    </style>
 </head>
 <body>
-  <!doctype html>
-<html lang="en">
-    <head>
-        <meta charset="utf-8" />
-        <link rel="stylesheet" href="style.css" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>gsplat.js - Viewer Demo</title>
-    </head>
+    <button id="ar-button" disabled>Enter AR</button>
 
-    <body>
-        <div id="progress-container">
-            <dialog open id="progress-dialog">
-                <p>
-                    <label for="progress-indicator">Loading scene...</label>
-                </p>
-                <progress max="100" id="progress-indicator"></progress>
-            </dialog>
-        </div>
-    
-        <canvas id="canvas"></canvas>
-    </body>
-</html>
+    <script type="module">
+        // Import Three.js from CDN
+        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.module.js';
+        import { ARButton } from 'https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/webxr/ARButton.js';
 
-
-  <script type="module">
-    import * as SPLAT from "https://cdn.jsdelivr.net/npm/gsplat@latest";
-
-const canvas = document.getElementById("canvas");
-const progressDialog = document.getElementById("progress-dialog");
-const progressIndicator = document.getElementById("progress-indicator");
-
-const renderer = new SPLAT.WebGLRenderer(canvas);
-const scene = new SPLAT.Scene();
-const camera = new SPLAT.Camera();
-const controls = new SPLAT.OrbitControls(camera, canvas);
-
-async function main() {
-    const url = "https://huggingface.co/cakewalk/splat-data/resolve/main/nike.splat";
-
-    await SPLAT.Loader.LoadAsync(url, scene, (progress) => progressIndicator.value = progress * 100);
-    progressDialog.close();
-
-    const handleResize = () => {
+        // Initialize scene, camera, and renderer
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-    };
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.xr.enabled = true;
+        document.body.appendChild(renderer.domElement);
 
-    const frame = () => {
-        controls.update();
-        renderer.render(scene, camera);
+        // Create lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+        directionalLight.position.set(0, 1, 0);
+        scene.add(directionalLight);
 
-        requestAnimationFrame(frame);
-    };
+        // Create a cube
+        const geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+        const material = new THREE.MeshStandardMaterial({ 
+            color: 0x00ff00,
+            roughness: 0.7,
+            metalness: 0.0
+        });
+        const cube = new THREE.Mesh(geometry, material);
+        cube.position.set(0, 0, -1); // Position the cube 1m in front of the camera
+        scene.add(cube);
 
-    handleResize();
-    window.addEventListener("resize", handleResize);
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
 
-    requestAnimationFrame(frame);
-}
+        // Setup AR button and session
+        document.getElementById('ar-button').addEventListener('click', () => {
+            startAR();
+        });
 
-main();
+        // Check if AR is supported
+        if ('xr' in navigator) {
+            navigator.xr.isSessionSupported('immersive-ar')
+                .then((supported) => {
+                    if (supported) {
+                        document.getElementById('ar-button').disabled = false;
+                    } else {
+                        console.error('AR not supported on this device');
+                        document.getElementById('ar-button').textContent = 'AR Not Supported';
+                    }
+                });
+        } else {
+            console.error('WebXR not supported in this browser');
+            document.getElementById('ar-button').textContent = 'WebXR Not Supported';
+        }
 
-  </script>
+        function startAR() {
+            // Replace our custom button with the ARButton from Three.js
+            document.getElementById('ar-button').style.display = 'none';
+            document.body.appendChild(ARButton.createButton(renderer, {
+                requiredFeatures: ['hit-test'],
+                optionalFeatures: ['dom-overlay'],
+                domOverlay: { root: document.body }
+            }));
+
+            // Animation loop
+            renderer.setAnimationLoop(render);
+        }
+
+        // Rotate the cube in each frame
+        function render(timestamp, frame) {
+            if (cube) {
+                cube.rotation.x += 0.01;
+                cube.rotation.y += 0.01;
+            }
+            renderer.render(scene, camera);
+        }
+    </script>
 </body>
 </html>
