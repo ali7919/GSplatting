@@ -98,7 +98,14 @@
     const progressIndicator = document.getElementById("progress-indicator");
     const arButton = document.getElementById("ar-button");
 
-    const renderer = new SPLAT.WebGLRenderer(canvas);
+    // Create the renderer with explicit XR compatibility
+    // First get a WebGL context with xrCompatible flag
+    const gl = canvas.getContext('webgl2', { xrCompatible: true }) || 
+               canvas.getContext('webgl', { xrCompatible: true });
+    
+    // Pass the XR-compatible GL context to the renderer
+    const renderer = new SPLAT.WebGLRenderer(canvas, gl);
+    
     const scene = new SPLAT.Scene();
     const camera = new SPLAT.Camera();
     const controls = new SPLAT.OrbitControls(camera, canvas);
@@ -107,6 +114,7 @@
     let xrRefSpace = null;
     let xrViewerSpace = null;
     let xrHitTestSource = null;
+    let modelPlaced = false;
 
     // Check if WebXR AR is supported
     function checkARSupport() {
@@ -129,13 +137,13 @@
       try {
         // Request an immersive-ar session
         xrSession = await navigator.xr.requestSession('immersive-ar', {
-          requiredFeatures: ['hit-test', 'local'],
+          requiredFeatures: ['hit-test'],
           optionalFeatures: ['dom-overlay'],
           domOverlay: { root: document.body }
         });
 
-        // Set up the WebXR GL layer
-        const glLayer = new XRWebGLLayer(xrSession, renderer.gl);
+        // Set up the WebXR GL layer with our xr compatible context
+        const glLayer = new XRWebGLLayer(xrSession, gl);
         xrSession.updateRenderState({ baseLayer: glLayer });
 
         // Get reference space
@@ -146,6 +154,9 @@
         xrHitTestSource = await xrSession.requestHitTestSource({
           space: xrViewerSpace
         });
+
+        // Reset placement status
+        modelPlaced = false;
 
         // Handle AR session end
         xrSession.addEventListener('end', () => {
@@ -174,35 +185,36 @@
       const pose = frame.getViewerPose(xrRefSpace);
       if (!pose) return;
 
-      // Get hit test results
-      const hitTestResults = frame.getHitTestResults(xrHitTestSource);
-      
-      if (hitTestResults.length > 0) {
-        // Get the first hit result
-        const hitPose = hitTestResults[0].getPose(xrRefSpace);
+      // Get hit test results if model hasn't been placed yet
+      if (!modelPlaced && xrHitTestSource) {
+        const hitTestResults = frame.getHitTestResults(xrHitTestSource);
         
-        // Update scene position based on hit test
-        // This positions the splat model where the user is pointing
-        const matrix = new Float32Array(16);
-        hitPose.transform.matrix.forEach((val, i) => {
-          matrix[i] = val;
-        });
-        
-        // Apply the transformation to the scene
-        scene.position.set(
-          matrix[12],
-          matrix[13],
-          matrix[14]
-        );
+        if (hitTestResults.length > 0) {
+          // Get the first hit result
+          const hitPose = hitTestResults[0].getPose(xrRefSpace);
+          
+          if (hitPose) {
+            // Position the splat model where user is pointing
+            const position = hitPose.transform.position;
+            scene.position.set(position.x, position.y, position.z);
+            
+            // Scale the model to a reasonable size for AR
+            scene.scale.set(0.5, 0.5, 0.5);
+            
+            // Mark as placed to stop repositioning
+            // Comment this line if you want continuous repositioning
+            modelPlaced = true;
+          }
+        }
       }
 
       // Render each view
       const layer = xrSession.renderState.baseLayer;
-      renderer.gl.bindFramebuffer(renderer.gl.FRAMEBUFFER, layer.framebuffer);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
       
       for (const view of pose.views) {
         const viewport = layer.getViewport(view);
-        renderer.gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
+        gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
         
         // Update camera based on view matrix
         const viewMatrix = view.transform.inverse.matrix;
