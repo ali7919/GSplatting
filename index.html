@@ -209,6 +209,9 @@ function checkXrSupport() {
 async function startARSession() {
     if (!xrSession) {
         try {
+            // Hide the regular 3D canvas view completely
+            canvas.style.display = 'none';
+            
             // Show debug info right away to help troubleshooting
             arDebug.style.display = 'block';
             arDebug.textContent = "Starting AR session...";
@@ -256,6 +259,10 @@ async function startARSession() {
                 arButton.textContent = 'Enter AR';
                 arDebug.style.display = 'none';
                 arInstructions.style.display = 'none';
+                
+                // Show the 3D viewer again when exiting AR
+                canvas.style.display = 'block';
+                
                 requestAnimationFrame(frame);
             });
             
@@ -275,6 +282,9 @@ async function startARSession() {
             arDebug.textContent = "AR session ready";
             
         } catch (error) {
+            // Show the canvas again if there was an error
+            canvas.style.display = 'block';
+            
             console.error('Error starting AR session:', error);
             arDebug.textContent = 'Error: ' + error.message;
             arDebug.style.display = 'block';
@@ -300,7 +310,7 @@ function onSelect(event) {
     }
 }
 
-// XR frame rendering
+// XR frame rendering - simplified to focus only on AR
 function onXRFrame(time, frame) {
     if (!xrSession) return;
     
@@ -344,16 +354,19 @@ function onXRFrame(time, frame) {
         }
     }
     
-    // Get the layer
-    const layer = xrSession.renderState.baseLayer;
+    // Debug info with just the essential information
+    const debugInfo = [
+        `AR active: ${xrSession ? 'yes' : 'no'}`,
+        `Surface detected: ${modelVisible ? 'yes' : 'no'}`,
+        `Placed in AR: ${placedModelInAR ? 'yes' : 'no'}`
+    ].join(" | ");
     
-    // Make sure we have the correct framebuffer
+    arDebug.textContent = debugInfo;
+    
+    // Handle the WebXR rendering
+    const layer = xrSession.renderState.baseLayer;
     gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
     
-    // This is critical: DO NOT CLEAR the framebuffer in AR mode!
-    // That would erase the camera feed
-    
-    // For each view (typically just one for AR)
     for (const view of pose.views) {
         const viewport = layer.getViewport(view);
         gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
@@ -362,29 +375,12 @@ function onXRFrame(time, frame) {
         camera.projectionMatrix = view.projectionMatrix;
         camera.viewMatrix = view.transform.inverse.matrix;
         
-        // Set appropriate WebGL state for rendering on top of camera feed
-        gl.disable(gl.DEPTH_TEST);
-        gl.enable(gl.BLEND);
-        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-        
-        // Debug info with more details about what's happening
-        const debugInfo = [
-            `Splats: ${scene.getSplatCount()}`,
-            `Model visible: ${modelVisible}`,
-            `Placed in AR: ${placedModelInAR}`,
-            `Position: ${scene.position ? JSON.stringify(scene.position) : "none"}`,
-            `View matrix: ${camera.viewMatrix ? "set" : "none"}`,
-            `Projection: ${camera.projectionMatrix ? "set" : "none"}`
-        ].join(" | ");
-        
-        arDebug.textContent = debugInfo;
-        
-        // Apply the model transform if we have content and render directly
-        if (modelVisible && scene.getSplatCount() > 0) {
+        // Apply the model transform if we have content and it's placed
+        if (modelVisible && scene.getSplatCount() > 0 && placedModelInAR) {
             // Apply position from hit test
             setSceneTransform(scene, modelMatrix);
             
-            // Render the scene without clearing the background
+            // Render the scene in AR mode
             renderer.render(scene, camera);
         }
     }
