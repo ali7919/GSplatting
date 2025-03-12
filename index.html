@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Gaussian Splatting Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            overflow: hidden;
+            background: #111;
+        }
+        #container {
+            width: 100vw;
+            height: 100vh;
+        }
+        #loading {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-family: Arial, sans-serif;
+            background: rgba(0,0,0,0.7);
+            padding: 10px 20px;
+            border-radius: 5px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading">Loading model...</div>
+    <div id="container"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@antimatter15/splat@0.0.1/dist/splat.min.js"></script>
+    <script>
+        async function initViewer() {
+            const loading = document.getElementById('loading');
+            const container = document.getElementById('container');
+            
+            try {
+                loading.style.display = 'block';
+                
+                // Initialize viewer
+                const viewer = new SplatViewer({
+                    container,
+                    cameraPosition: [2, 2, 2]
+                });
+
+                // Load the Nike model
+                await viewer.load('https://huggingface.co/cakewalk/splat-data/resolve/main/nike.splat');
+                
+                loading.style.display = 'none';
+            } catch (error) {
+                loading.style.display = 'none';
+                alert('Error loading model: ' + error.message);
+            }
+        }
+
+        // Start initialization when page loads
+        window.addEventListener('load', initViewer);
+    </script>
+</body>
+</html>
