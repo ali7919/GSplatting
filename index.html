@@ -73,6 +73,30 @@ progress::-moz-progress-bar {
     display: none;
 }
 
+#ar-debug {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    color: white;
+    background-color: rgba(0,0,0,0.5);
+    padding: 10px;
+    font-family: monospace;
+    display: none;
+}
+
+#ar-instructions {
+    position: absolute;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: white;
+    background-color: rgba(0,0,0,0.7);
+    padding: 10px;
+    border-radius: 4px;
+    text-align: center;
+    display: none;
+}
+
   </style>
 
   
@@ -99,6 +123,8 @@ progress::-moz-progress-bar {
     
         <canvas id="canvas"></canvas>
         <button id="ar-button">Enter AR</button>
+        <div id="ar-debug"></div>
+        <div id="ar-instructions">Tap on a surface to place the model</div>
     </body>
 </html>
 
@@ -110,6 +136,8 @@ const canvas = document.getElementById("canvas");
 const progressDialog = document.getElementById("progress-dialog");
 const progressIndicator = document.getElementById("progress-indicator");
 const arButton = document.getElementById("ar-button");
+const arDebug = document.getElementById("ar-debug");
+const arInstructions = document.getElementById("ar-instructions");
 
 const renderer = new SPLAT.WebGLRenderer(canvas);
 const scene = new SPLAT.Scene();
@@ -118,6 +146,22 @@ const controls = new SPLAT.OrbitControls(camera, canvas);
 
 let xrSession = null;
 let xrRefSpace = null;
+let hitTestSource = null;
+let hitTestSourceRequested = false;
+let placedModelInAR = false;
+let modelMatrix = new Float32Array(16);
+let modelVisible = false;
+let modelScale = 0.5;
+
+// Initialize identity matrix
+function initModelMatrix() {
+    modelMatrix.set([
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, -1.5, 1  // Initial position 1.5m in front
+    ]);
+}
 
 // Check if WebXR is available
 function checkXrSupport() {
@@ -125,6 +169,7 @@ function checkXrSupport() {
         navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
             if (supported) {
                 arButton.style.display = 'block';
+                initModelMatrix();
             }
         });
     }
@@ -136,7 +181,7 @@ async function startARSession() {
         try {
             // Request an AR session
             xrSession = await navigator.xr.requestSession('immersive-ar', {
-                requiredFeatures: ['local'],
+                requiredFeatures: ['local', 'hit-test'],
                 optionalFeatures: ['dom-overlay'],
                 domOverlay: { root: document.body }
             });
@@ -154,21 +199,45 @@ async function startARSession() {
             
             // Setup session end event
             xrSession.addEventListener('end', () => {
+                hitTestSourceRequested = false;
+                hitTestSource = null;
+                placedModelInAR = false;
                 xrSession = null;
                 arButton.textContent = 'Enter AR';
+                arDebug.style.display = 'none';
+                arInstructions.style.display = 'none';
                 requestAnimationFrame(frame);
             });
             
             arButton.textContent = 'Exit AR';
+            arDebug.style.display = 'block';
+            arInstructions.style.display = 'block';
+            
+            // Add select event for placing the model
+            xrSession.addEventListener('select', onSelect);
             
             // Start AR rendering
             xrSession.requestAnimationFrame(onXRFrame);
+            
         } catch (error) {
             console.error('Error starting AR session:', error);
+            arDebug.textContent = 'Error: ' + error.message;
+            arDebug.style.display = 'block';
         }
     } else {
         // End current session
         xrSession.end();
+    }
+}
+
+// Handle selection events in AR (tap on screen)
+function onSelect(event) {
+    if (hitTestSource && !placedModelInAR) {
+        placedModelInAR = true;
+        arInstructions.textContent = "Model placed! Move around to see it from different angles.";
+        setTimeout(() => {
+            arInstructions.style.display = 'none';
+        }, 3000);
     }
 }
 
@@ -182,6 +251,39 @@ function onXRFrame(time, frame) {
     // Get the viewer pose
     const pose = frame.getViewerPose(xrRefSpace);
     if (!pose) return;
+    
+    // Set up hit testing if needed
+    if (!hitTestSourceRequested) {
+        xrSession.requestReferenceSpace('viewer').then((viewerSpace) => {
+            xrSession.requestHitTestSource({ space: viewerSpace }).then((source) => {
+                hitTestSource = source;
+            });
+        });
+        hitTestSourceRequested = true;
+    }
+    
+    // Perform hit test if needed
+    if (hitTestSource && !placedModelInAR) {
+        const hitTestResults = frame.getHitTestResults(hitTestSource);
+        if (hitTestResults.length > 0) {
+            const hit = hitTestResults[0];
+            const hitPose = hit.getPose(xrRefSpace);
+            
+            if (hitPose) {
+                // Get the hit test transform matrix
+                modelMatrix = hitPose.transform.matrix;
+                // Scale model after placing
+                applyScale(modelMatrix, modelScale, modelScale, modelScale);
+                modelVisible = true;
+                
+                // Debug info
+                arDebug.textContent = "Hit detected: Tap to place model";
+            }
+        } else {
+            arDebug.textContent = "No surfaces detected. Point at a surface.";
+            modelVisible = false;
+        }
+    }
     
     // Get the layer and bind its framebuffer
     const layer = xrSession.renderState.baseLayer;
@@ -197,16 +299,51 @@ function onXRFrame(time, frame) {
         camera.projectionMatrix = view.projectionMatrix;
         camera.viewMatrix = view.transform.inverse.matrix;
         
-        // Position model in front of user if it's the first frame
-        if (!scene.hasBeenPositioned && scene.getSplatCount() > 0) {
-            scene.position = [0, 0, -1.5]; // Position it 1.5 meters in front
-            scene.scale = [0.5, 0.5, 0.5]; // Scale it down to a reasonable size
-            scene.hasBeenPositioned = true;
+        // Debug info
+        if (scene.getSplatCount() > 0) {
+            arDebug.textContent = `Model loaded: ${scene.getSplatCount()} splats. ${modelVisible ? 'Model visible' : 'Model not placed yet'}`;
+        } else {
+            arDebug.textContent = "Model not loaded yet";
         }
         
-        // Render the scene
-        renderer.render(scene, camera);
+        // Apply the model transform if we have content
+        if (modelVisible && scene.getSplatCount() > 0) {
+            // Apply position from hit test or default position
+            setSceneTransform(scene, modelMatrix);
+            
+            // Render the scene
+            renderer.render(scene, camera);
+        } else {
+            // Just render a blank frame if no model or not placed yet
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        }
     }
+}
+
+// Apply scale to a matrix
+function applyScale(matrix, scaleX, scaleY, scaleZ) {
+    // Scale the first three columns of the matrix
+    matrix[0] *= scaleX;
+    matrix[1] *= scaleX;
+    matrix[2] *= scaleX;
+    
+    matrix[4] *= scaleY;
+    matrix[5] *= scaleY;
+    matrix[6] *= scaleY;
+    
+    matrix[8] *= scaleZ;
+    matrix[9] *= scaleZ;
+    matrix[10] *= scaleZ;
+}
+
+// Set scene transform from matrix
+function setSceneTransform(scene, matrix) {
+    // Extract position from the matrix (last column)
+    scene.position = [matrix[12], matrix[13], matrix[14]];
+    
+    // Extract rotation based on the 3x3 rotation part of the matrix
+    // (This is simplified; actual implementation would depend on how SPLAT.js handles rotation)
+    // The scale is already applied to the matrix
 }
 
 async function main() {
