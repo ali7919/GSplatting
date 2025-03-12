@@ -139,6 +139,14 @@ const arButton = document.getElementById("ar-button");
 const arDebug = document.getElementById("ar-debug");
 const arInstructions = document.getElementById("ar-instructions");
 
+// Create WebGL context first
+const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
+if (!gl) {
+    console.error("WebGL not supported");
+    arDebug.textContent = "Error: WebGL not supported";
+    arDebug.style.display = 'block';
+}
+
 const renderer = new SPLAT.WebGLRenderer(canvas);
 const scene = new SPLAT.Scene();
 const camera = new SPLAT.Camera();
@@ -186,8 +194,7 @@ async function startARSession() {
                 domOverlay: { root: document.body }
             });
             
-            // Set up XR session
-            const gl = renderer.getContext();
+            // Set up XR session with our already created WebGL context
             await gl.makeXRCompatible();
             
             xrSession.updateRenderState({
@@ -285,9 +292,8 @@ function onXRFrame(time, frame) {
         }
     }
     
-    // Get the layer and bind its framebuffer
+    // Get the layer and bind its framebuffer - use our gl context directly
     const layer = xrSession.renderState.baseLayer;
-    const gl = renderer.getContext();
     gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
     
     // For each view (typically just one for AR)
