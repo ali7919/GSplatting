@@ -4,20 +4,192 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>3D Gaussian Splatting Viewer</title>
-    <link rel="stylesheet" href="style.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            background-color: #000;
+            color: #fff;
+            overflow: hidden;
+        }
+
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #canvas {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            left: 0;
+        }
+
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 100;
+            border-radius: 5px;
+            transition: opacity 0.5s ease;
+        }
+
+        #loading-progress {
+            font-weight: bold;
+            color: #4CAF50;
+            margin-top: 5px;
+        }
+
+        h1 {
+            margin: 0 0 10px 0;
+            font-size: 24px;
+        }
+
+        p {
+            margin: 0 0 10px 0;
+        }
+
+        #error {
+            color: #ff5555;
+            font-weight: bold;
+        }
+    </style>
 </head>
 <body>
     <div id="container">
         <div id="info">
             <h1>3D Gaussian Splatting Viewer</h1>
-            <p>Loading Nike Splat from Hugging Face...</p>
-            <div id="loading-progress">0%</div>
+            <p id="status">Loading viewer...</p>
+            <div id="loading-progress"></div>
+            <div id="error"></div>
         </div>
         <canvas id="canvas"></canvas>
     </div>
 
-    <!-- Import GSplat library -->
-    <script async src="https://cdn.jsdelivr.net/npm/gsplat@latest"></script>
-    <script src="script.js"></script>
+    <script>
+        // Let's ensure we properly handle the GSplat library loading
+        function loadScript(url) {
+            return new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = url;
+                script.onload = resolve;
+                script.onerror = () => reject(new Error(`Failed to load script: ${url}`));
+                document.head.appendChild(script);
+            });
+        }
+
+        async function initViewer() {
+            const canvas = document.getElementById('canvas');
+            const statusElement = document.getElementById('status');
+            const progressElement = document.getElementById('loading-progress');
+            const infoElement = document.getElementById('info');
+            const errorElement = document.getElementById('error');
+
+            try {
+                // First load the GSplat library
+                statusElement.textContent = "Loading GSplat library...";
+                await loadScript("https://unpkg.com/gsplat@0.3.9/dist/gsplat.js");
+                
+                // Check if GSplat was loaded correctly
+                if (typeof GSplat === 'undefined') {
+                    throw new Error("GSplat library failed to initialize");
+                }
+
+                statusElement.textContent = "Initializing viewer...";
+
+                // Initialize the renderer
+                const renderer = new GSplat.WebGLRenderer(canvas);
+                const scene = new GSplat.Scene();
+                const camera = new GSplat.PerspectiveCamera();
+                const controls = new GSplat.OrbitControls(camera, canvas);
+
+                // Set up camera
+                camera.position.set(0, 0, 3);
+                
+                // URL to the Nike splat file
+                const splatUrl = "https://huggingface.co/cakewalk/splat-data/resolve/main/nike.splat";
+                
+                // Display loading status
+                statusElement.textContent = 'Loading Nike Gaussian Splat...';
+                progressElement.textContent = 'Preparing download...';
+                
+                // Load the splat
+                const loader = new GSplat.SplatLoader();
+                
+                // Add progress tracking
+                loader.addEventListener('progress', (e) => {
+                    const percent = Math.round(e.loaded / e.total * 100);
+                    progressElement.textContent = `Downloaded: ${percent}%`;
+                });
+                
+                // Load the gaussian splat
+                statusElement.textContent = 'Downloading Gaussian Splat data...';
+                const splat = await loader.loadAsync(splatUrl);
+                
+                statusElement.textContent = 'Processing Gaussian Splat data...';
+                scene.add(splat);
+                
+                // Success message
+                statusElement.textContent = 'Gaussian Splat loaded successfully!';
+                progressElement.textContent = '';
+                
+                // Fade out the info panel after a delay
+                setTimeout(() => {
+                    infoElement.style.opacity = "0";
+                    setTimeout(() => {
+                        infoElement.style.display = "none";
+                    }, 500);
+                }, 2000);
+                
+                // Set initial renderer size
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                
+                // Animation loop
+                function animate() {
+                    requestAnimationFrame(animate);
+                    controls.update();
+                    renderer.render(scene, camera);
+                }
+                
+                // Start the animation loop
+                animate();
+                
+                // Add event to show/hide info on click
+                canvas.addEventListener('click', () => {
+                    if (infoElement.style.display === "none") {
+                        infoElement.style.display = "block";
+                        setTimeout(() => {
+                            infoElement.style.opacity = "1";
+                        }, 0);
+                    } else {
+                        infoElement.style.opacity = "0";
+                        setTimeout(() => {
+                            infoElement.style.display = "none";
+                        }, 500);
+                    }
+                });
+                
+                // Handle window resize
+                window.addEventListener('resize', () => {
+                    camera.aspect = window.innerWidth / window.innerHeight;
+                    camera.updateProjectionMatrix();
+                    renderer.setSize(window.innerWidth, window.innerHeight);
+                });
+                
+            } catch (error) {
+                console.error("Error:", error);
+                statusElement.textContent = "Error occurred";
+                errorElement.textContent = error.message || "Unknown error";
+            }
+        }
+
+        // Start the initialization when the page loads
+        window.addEventListener('load', initViewer);
+    </script>
 </body>
 </html>
