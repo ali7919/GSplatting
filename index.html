@@ -139,31 +139,18 @@ const arButton = document.getElementById("ar-button");
 const arDebug = document.getElementById("ar-debug");
 const arInstructions = document.getElementById("ar-instructions");
 
-// Create a new canvas specifically for AR rendering
-const arCanvas = document.createElement('canvas');
-arCanvas.style.width = '100vw';
-arCanvas.style.height = '100vh';
-arCanvas.style.position = 'absolute';
-arCanvas.style.top = '0';
-arCanvas.style.left = '0';
-arCanvas.style.display = 'none';
-document.body.appendChild(arCanvas);
-
-// Create WebGL context for the 3D viewer with standard settings
-const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
-
-// Create WebGL context for AR specifically configured for XR
-const arGl = arCanvas.getContext("webgl2", { 
-    xrCompatible: true,
+// Create WebGL context first with alpha configuration
+const gl = canvas.getContext("webgl2", {
     alpha: true,
+    premultipliedAlpha: false,
     antialias: true,
-    powerPreference: 'high-performance'
+    preserveDrawingBuffer: false
 }) || 
-arCanvas.getContext("webgl", { 
-    xrCompatible: true, 
+canvas.getContext("webgl", {
     alpha: true,
+    premultipliedAlpha: false,
     antialias: true,
-    powerPreference: 'high-performance'
+    preserveDrawingBuffer: false
 });
 
 if (!gl) {
@@ -172,18 +159,29 @@ if (!gl) {
     arDebug.style.display = 'block';
 }
 
-if (!arGl) {
-    console.error("WebGL not supported for AR");
-    arDebug.textContent = "Error: WebGL not supported for AR";
-    arDebug.style.display = 'block';
-    arButton.style.display = 'none';
-}
-
-// Set up renderer with normal WebGL context
+// Set up renderer with transparent background
 const renderer = new SPLAT.WebGLRenderer(canvas);
 
-// Set up a separate renderer for AR with the XR-compatible context
-let arRenderer = null;
+// Try to configure renderer for transparency if the API supports it
+if (renderer.setClearColor) {
+    renderer.setClearColor(0, 0, 0, 0); // Fully transparent
+}
+if (renderer.autoClear !== undefined) {
+    renderer.autoClear = false; // Don't automatically clear the canvas
+}
+
+const scene = new SPLAT.Scene();
+const camera = new SPLAT.Camera();
+const controls = new SPLAT.OrbitControls(camera, canvas);
+
+let xrSession = null;
+let xrRefSpace = null;
+let hitTestSource = null;
+let hitTestSourceRequested = false;
+let placedModelInAR = false;
+let modelMatrix = new Float32Array(16);
+let modelVisible = false;
+let modelScale = 0.5;
 
 // Initialize identity matrix
 function initModelMatrix() {
@@ -199,13 +197,9 @@ function initModelMatrix() {
 function checkXrSupport() {
     if ('xr' in navigator) {
         navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
-            if (supported && arGl) {
+            if (supported) {
                 arButton.style.display = 'block';
                 initModelMatrix();
-            } else {
-                arDebug.textContent = "AR not supported on this device";
-                arDebug.style.display = 'block';
-                setTimeout(() => arDebug.style.display = 'none', 3000);
             }
         });
     }
@@ -215,39 +209,34 @@ function checkXrSupport() {
 async function startARSession() {
     if (!xrSession) {
         try {
-            // Hide the regular 3D canvas and show the AR canvas
+            // Hide the regular 3D canvas view completely
             canvas.style.display = 'none';
-            arCanvas.style.display = 'block';
             
             // Show debug info right away to help troubleshooting
             arDebug.style.display = 'block';
             arDebug.textContent = "Starting AR session...";
             
-            // Only create the AR renderer when needed
-            if (!arRenderer) {
-                arRenderer = new SPLAT.WebGLRenderer(arCanvas);
-            }
-            
             // Request an AR session with camera passthrough explicitly listed
             xrSession = await navigator.xr.requestSession('immersive-ar', {
                 requiredFeatures: ['local', 'hit-test'],
-                optionalFeatures: ['dom-overlay'],
+                optionalFeatures: ['dom-overlay', 'camera-access'],
                 domOverlay: { root: document.body }
             });
             
             arDebug.textContent = "AR session created, setting up WebGL...";
             
-            // No need to call makeXRCompatible since we created it with xrCompatible: true
+            // Set up XR session with our already created WebGL context
+            await gl.makeXRCompatible();
             
             // Set important WebGL state for transparency
-            arGl.enable(arGl.BLEND);
-            arGl.blendFunc(arGl.SRC_ALPHA, arGl.ONE_MINUS_SRC_ALPHA);
-            arGl.clearColor(0, 0, 0, 0); // Fully transparent clear color
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+            gl.clearColor(0, 0, 0, 0); // Fully transparent clear color
             
             arDebug.textContent = "WebGL configured, creating baseLayer...";
             
             // Create a WebXR layer with alpha channel enabled
-            const baseLayer = new XRWebGLLayer(xrSession, arGl, { 
+            const baseLayer = new XRWebGLLayer(xrSession, gl, { 
                 alpha: true,
                 framebufferScaleFactor: 1.0
             });
@@ -271,8 +260,7 @@ async function startARSession() {
                 arDebug.style.display = 'none';
                 arInstructions.style.display = 'none';
                 
-                // Hide AR canvas and show regular canvas when exiting AR
-                arCanvas.style.display = 'none';
+                // Show the 3D viewer again when exiting AR
                 canvas.style.display = 'block';
                 
                 requestAnimationFrame(frame);
@@ -285,6 +273,9 @@ async function startARSession() {
             // Add select event for placing the model
             xrSession.addEventListener('select', onSelect);
             
+            // Set clear color to fully transparent
+            gl.clearColor(0, 0, 0, 0);
+            
             // Start AR rendering
             xrSession.requestAnimationFrame(onXRFrame);
             
@@ -293,18 +284,10 @@ async function startARSession() {
         } catch (error) {
             // Show the canvas again if there was an error
             canvas.style.display = 'block';
-            arCanvas.style.display = 'none';
             
             console.error('Error starting AR session:', error);
             arDebug.textContent = 'Error: ' + error.message;
             arDebug.style.display = 'block';
-            
-            // Auto-hide error after a few seconds
-            setTimeout(() => {
-                if (arDebug.textContent.includes(error.message)) {
-                    arDebug.style.display = 'none';
-                }
-            }, 5000);
         }
     } else {
         // End current session
@@ -380,13 +363,13 @@ function onXRFrame(time, frame) {
     
     arDebug.textContent = debugInfo;
     
-    // Handle the WebXR rendering with arRenderer
+    // Handle the WebXR rendering
     const layer = xrSession.renderState.baseLayer;
-    arGl.bindFramebuffer(arGl.FRAMEBUFFER, layer.framebuffer);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
     
     for (const view of pose.views) {
         const viewport = layer.getViewport(view);
-        arGl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
+        gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
         
         // Update camera with the view and projection matrices
         camera.projectionMatrix = view.projectionMatrix;
@@ -397,8 +380,8 @@ function onXRFrame(time, frame) {
             // Apply position from hit test
             setSceneTransform(scene, modelMatrix);
             
-            // Render the scene in AR mode using the AR renderer
-            arRenderer.render(scene, camera);
+            // Render the scene in AR mode
+            renderer.render(scene, camera);
         }
     }
 }
@@ -437,17 +420,17 @@ function runARTestRenderer() {
     
     // Get the current framebuffer
     const layer = xrSession.renderState.baseLayer;
-    arGl.bindFramebuffer(arGl.FRAMEBUFFER, layer.framebuffer);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
     
     // Set up for a simple colored quad
-    arGl.viewport(0, 0, layer.framebufferWidth, layer.framebufferHeight);
-    arGl.disable(arGl.DEPTH_TEST);
-    arGl.enable(arGl.BLEND);
-    arGl.blendFunc(arGl.SRC_ALPHA, arGl.ONE_MINUS_SRC_ALPHA);
+    gl.viewport(0, 0, layer.framebufferWidth, layer.framebufferHeight);
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     
     // Just a simple color overlay to see if direct rendering works
-    arGl.clearColor(1.0, 0, 0, 0.5);  // Semi-transparent red
-    arGl.clear(arGl.COLOR_BUFFER_BIT);
+    gl.clearColor(1.0, 0, 0, 0.5);  // Semi-transparent red
+    gl.clear(gl.COLOR_BUFFER_BIT);
     
     arDebug.textContent += " - Test complete";
 }
