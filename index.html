@@ -1,5 +1,7 @@
 <!DOCTYPE html>
 <html>
+
+<html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -56,63 +58,35 @@ progress::-moz-progress-bar {
     background-color: #eee;
 }
 
-#ar-button {
-    position: absolute;
-    bottom: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    padding: 12px 20px;
-    background-color: #fff;
-    color: #000;
-    border: none;
-    border-radius: 4px;
-    font-weight: bold;
-    cursor: pointer;
-    display: none;
-}
-
-#ar-debug {
-    position: absolute;
-    top: 10px;
-    left: 10px;
-    color: white;
-    background-color: rgba(0,0,0,0.5);
-    padding: 10px;
-    font-family: monospace;
-    display: none;
-}
-
-#ar-instructions {
-    position: absolute;
-    bottom: 80px;
-    left: 50%;
-    transform: translateX(-50%);
-    color: white;
-    background-color: rgba(0,0,0,0.7);
-    padding: 10px;
-    border-radius: 4px;
-    text-align: center;
-    display: none;
-}
-
   </style>
 
   
 </head>
 <body>
-    <div id="progress-container">
-        <dialog open id="progress-dialog">
-            <p>
-                <label for="progress-indicator">Loading scene...</label>
-            </p>
-            <progress max="100" id="progress-indicator"></progress>
-        </dialog>
-    </div>
+  <!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <link rel="stylesheet" href="style.css" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>gsplat.js - Viewer Demo</title>
+    </head>
 
-    <canvas id="canvas"></canvas>
-    <button id="ar-button">Enter AR</button>
-    <div id="ar-debug"></div>
-    <div id="ar-instructions">Tap on a surface to place the model</div>
+    <body>
+        <div id="progress-container">
+            <dialog open id="progress-dialog">
+                <p>
+                    <label for="progress-indicator">Loading scene...</label>
+                </p>
+                <progress max="100" id="progress-indicator"></progress>
+            </dialog>
+        </div>
+    
+        <canvas id="canvas"></canvas>
+        <button id="enter-ar">Enter AR</button>
+    </body>
+</html>
+
 
   <script type="module">
     import * as SPLAT from "https://cdn.jsdelivr.net/npm/gsplat@latest";
@@ -120,328 +94,27 @@ progress::-moz-progress-bar {
 const canvas = document.getElementById("canvas");
 const progressDialog = document.getElementById("progress-dialog");
 const progressIndicator = document.getElementById("progress-indicator");
-const arButton = document.getElementById("ar-button");
-const arDebug = document.getElementById("ar-debug");
-const arInstructions = document.getElementById("ar-instructions");
 
-// Create WebGL context first with alpha configuration
-const gl = canvas.getContext("webgl2", {
-    alpha: true,
-    premultipliedAlpha: false,
-    antialias: true,
-    preserveDrawingBuffer: false
-}) || 
-canvas.getContext("webgl", {
-    alpha: true,
-    premultipliedAlpha: false,
-    antialias: true,
-    preserveDrawingBuffer: false
-});
-
-if (!gl) {
-    console.error("WebGL not supported");
-    arDebug.textContent = "Error: WebGL not supported";
-    arDebug.style.display = 'block';
-}
-
-// Set up renderer with transparent background
 const renderer = new SPLAT.WebGLRenderer(canvas);
-
-// Try to configure renderer for transparency if the API supports it
-if (renderer.setClearColor) {
-    renderer.setClearColor(0, 0, 0, 0); // Fully transparent
-}
-if (renderer.autoClear !== undefined) {
-    renderer.autoClear = false; // Don't automatically clear the canvas
-}
-
 const scene = new SPLAT.Scene();
 const camera = new SPLAT.Camera();
 const controls = new SPLAT.OrbitControls(camera, canvas);
-
-let xrSession = null;
-let xrRefSpace = null;
-let hitTestSource = null;
-let hitTestSourceRequested = false;
-let placedModelInAR = false;
-let modelMatrix = new Float32Array(16);
-let modelVisible = false;
-let modelScale = 0.5;
-
-// Initialize identity matrix
-function initModelMatrix() {
-    modelMatrix.set([
-        1, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, 1, 0,
-        0, 0, -1.5, 1  // Initial position 1.5m in front
-    ]);
-}
-
-// Check if WebXR is available
-function checkXrSupport() {
-    if ('xr' in navigator) {
-        navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
-            if (supported) {
-                arButton.style.display = 'block';
-                initModelMatrix();
-            }
-        });
-    }
-}
-
-// Start AR session
-async function startARSession() {
-    if (!xrSession) {
-        try {
-            // Hide the regular 3D canvas view completely
-            canvas.style.display = 'none';
-            
-            // Show debug info right away to help troubleshooting
-            arDebug.style.display = 'block';
-            arDebug.textContent = "Starting AR session...";
-            
-            // Request an AR session with camera passthrough explicitly listed
-            xrSession = await navigator.xr.requestSession('immersive-ar', {
-                requiredFeatures: ['local', 'hit-test'],
-                optionalFeatures: ['dom-overlay', 'camera-access'],
-                domOverlay: { root: document.body }
-            });
-            
-            arDebug.textContent = "AR session created, setting up WebGL...";
-            
-            // Set up XR session with our already created WebGL context
-            await gl.makeXRCompatible();
-            
-            // Set important WebGL state for transparency
-            gl.enable(gl.BLEND);
-            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-            gl.clearColor(0, 0, 0, 0); // Fully transparent clear color
-            
-            arDebug.textContent = "WebGL configured, creating baseLayer...";
-            
-            // Create a WebXR layer with alpha channel enabled
-            const baseLayer = new XRWebGLLayer(xrSession, gl, { 
-                alpha: true,
-                framebufferScaleFactor: 1.0
-            });
-            
-            xrSession.updateRenderState({
-                baseLayer: baseLayer
-            });
-            
-            arDebug.textContent = "Getting reference space...";
-            
-            // Get reference space
-            xrRefSpace = await xrSession.requestReferenceSpace('local');
-            
-            // Setup session end event
-            xrSession.addEventListener('end', () => {
-                hitTestSourceRequested = false;
-                hitTestSource = null;
-                placedModelInAR = false;
-                xrSession = null;
-                arButton.textContent = 'Enter AR';
-                arDebug.style.display = 'none';
-                arInstructions.style.display = 'none';
-                
-                // Show the 3D viewer again when exiting AR
-                canvas.style.display = 'block';
-                
-                requestAnimationFrame(frame);
-            });
-            
-            arButton.textContent = 'Exit AR';
-            arDebug.style.display = 'block';
-            arInstructions.style.display = 'block';
-            
-            // Add select event for placing the model
-            xrSession.addEventListener('select', onSelect);
-            
-            // Set clear color to fully transparent
-            gl.clearColor(0, 0, 0, 0);
-            
-            // Start AR rendering
-            xrSession.requestAnimationFrame(onXRFrame);
-            
-            arDebug.textContent = "AR session ready";
-            
-        } catch (error) {
-            // Show the canvas again if there was an error
-            canvas.style.display = 'block';
-            
-            console.error('Error starting AR session:', error);
-            arDebug.textContent = 'Error: ' + error.message;
-            arDebug.style.display = 'block';
-        }
-    } else {
-        // End current session
-        xrSession.end();
-    }
-}
-
-// Handle selection events in AR (tap on screen)
-function onSelect(event) {
-    if (hitTestSource && !placedModelInAR) {
-        placedModelInAR = true;
-        arInstructions.textContent = "Model placed! Move around to see it from different angles.";
-        
-        // Run test renderer on first tap to see if direct WebGL works
-        setTimeout(runARTestRenderer, 500);
-        
-        setTimeout(() => {
-            arInstructions.style.display = 'none';
-        }, 3000);
-    }
-}
-
-// XR frame rendering - simplified to focus only on AR
-function onXRFrame(time, frame) {
-    if (!xrSession) return;
-    
-    // Queue the next frame
-    xrSession.requestAnimationFrame(onXRFrame);
-    
-    // Get the viewer pose
-    const pose = frame.getViewerPose(xrRefSpace);
-    if (!pose) return;
-    
-    // Set up hit testing if needed
-    if (!hitTestSourceRequested) {
-        xrSession.requestReferenceSpace('viewer').then((viewerSpace) => {
-            xrSession.requestHitTestSource({ space: viewerSpace }).then((source) => {
-                hitTestSource = source;
-            });
-        });
-        hitTestSourceRequested = true;
-    }
-    
-    // Perform hit test if needed
-    if (hitTestSource && !placedModelInAR) {
-        const hitTestResults = frame.getHitTestResults(hitTestSource);
-        if (hitTestResults.length > 0) {
-            const hit = hitTestResults[0];
-            const hitPose = hit.getPose(xrRefSpace);
-            
-            if (hitPose) {
-                // Get the hit test transform matrix
-                modelMatrix = hitPose.transform.matrix;
-                // Scale model after placing
-                applyScale(modelMatrix, modelScale, modelScale, modelScale);
-                modelVisible = true;
-                
-                // Debug info
-                arDebug.textContent = "Hit detected: Tap to place model";
-            }
-        } else {
-            arDebug.textContent = "No surfaces detected. Point at a surface.";
-            modelVisible = false;
-        }
-    }
-    
-    // Debug info with just the essential information
-    const debugInfo = [
-        `AR active: ${xrSession ? 'yes' : 'no'}`,
-        `Surface detected: ${modelVisible ? 'yes' : 'no'}`,
-        `Placed in AR: ${placedModelInAR ? 'yes' : 'no'}`
-    ].join(" | ");
-    
-    arDebug.textContent = debugInfo;
-    
-    // Handle the WebXR rendering
-    const layer = xrSession.renderState.baseLayer;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
-    
-    for (const view of pose.views) {
-        const viewport = layer.getViewport(view);
-        gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
-        
-        // Update camera with the view and projection matrices
-        camera.projectionMatrix = view.projectionMatrix;
-        camera.viewMatrix = view.transform.inverse.matrix;
-        
-        // Apply the model transform if we have content and it's placed
-        if (modelVisible && scene.getSplatCount() > 0 && placedModelInAR) {
-            // Apply position from hit test
-            setSceneTransform(scene, modelMatrix);
-            
-            // Render the scene in AR mode
-            renderer.render(scene, camera);
-        }
-    }
-}
-
-// Apply scale to a matrix
-function applyScale(matrix, scaleX, scaleY, scaleZ) {
-    // Scale the first three columns of the matrix
-    matrix[0] *= scaleX;
-    matrix[1] *= scaleX;
-    matrix[2] *= scaleX;
-    
-    matrix[4] *= scaleY;
-    matrix[5] *= scaleY;
-    matrix[6] *= scaleY;
-    
-    matrix[8] *= scaleZ;
-    matrix[9] *= scaleZ;
-    matrix[10] *= scaleZ;
-}
-
-// Set scene transform from matrix
-function setSceneTransform(scene, matrix) {
-    // Extract position from the matrix (last column)
-    scene.position = [matrix[12], matrix[13], matrix[14]];
-    
-    // Extract rotation based on the 3x3 rotation part of the matrix
-    // (This is simplified; actual implementation would depend on how SPLAT.js handles rotation)
-    // The scale is already applied to the matrix
-}
-
-// Add a simple render test function to debug the AR issue
-function runARTestRenderer() {
-    if (!xrSession) return;
-    
-    arDebug.textContent = "Testing direct WebGL rendering...";
-    
-    // Get the current framebuffer
-    const layer = xrSession.renderState.baseLayer;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
-    
-    // Set up for a simple colored quad
-    gl.viewport(0, 0, layer.framebufferWidth, layer.framebufferHeight);
-    gl.disable(gl.DEPTH_TEST);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    
-    // Just a simple color overlay to see if direct rendering works
-    gl.clearColor(1.0, 0, 0, 0.5);  // Semi-transparent red
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    
-    arDebug.textContent += " - Test complete";
-}
 
 async function main() {
     const url = "https://huggingface.co/cakewalk/splat-data/resolve/main/nike.splat";
 
     await SPLAT.Loader.LoadAsync(url, scene, (progress) => progressIndicator.value = progress * 100);
     progressDialog.close();
-    
-    // Check AR support
-    checkXrSupport();
-    
-    // Add event listener for AR button
-    arButton.addEventListener('click', startARSession);
 
     const handleResize = () => {
         renderer.setSize(window.innerWidth, window.innerHeight);
     };
 
     const frame = () => {
-        if (!xrSession) { // Only run normal render loop when not in XR
-            controls.update();
-            renderer.render(scene, camera);
-            requestAnimationFrame(frame);
-        }
+        controls.update();
+        renderer.render(scene, camera);
+
+        requestAnimationFrame(frame);
     };
 
     handleResize();
@@ -451,6 +124,10 @@ async function main() {
 }
 
 main();
+
+document.getElementById("enter-ar").addEventListener("click", async () => {
+    // Add AR loading logic here
+});
 
   </script>
 </body>
