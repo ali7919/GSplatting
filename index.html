@@ -3,288 +3,474 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Gaussian Splatting Viewer</title>
+    <title>Nike Gaussian Splat Viewer</title>
     <style>
-        body {
+        body, html {
             margin: 0;
             padding: 0;
-            font-family: Arial, sans-serif;
-            background-color: #000;
-            color: #fff;
-            overflow: hidden;
-        }
-
-        #container {
-            position: relative;
-            width: 100vw;
-            height: 100vh;
-        }
-
-        #canvas {
-            position: absolute;
             width: 100%;
             height: 100%;
-            top: 0;
-            left: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
         }
-
+        #container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+        }
+        #canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
         #info {
             position: absolute;
-            top: 10px;
+            bottom: 10px;
             left: 10px;
+            color: white;
+            background-color: rgba(0, 0, 0, 0.5);
             padding: 10px;
-            background-color: rgba(0, 0, 0, 0.7);
-            z-index: 100;
             border-radius: 5px;
-            transition: opacity 0.5s ease;
-        }
-
-        #loading-progress {
-            font-weight: bold;
-            color: #4CAF50;
-            margin-top: 5px;
-        }
-
-        h1 {
-            margin: 0 0 10px 0;
-            font-size: 24px;
-        }
-
-        p {
-            margin: 0 0 10px 0;
-        }
-
-        #error {
-            color: #ff5555;
-            font-weight: bold;
+            font-size: 14px;
         }
     </style>
 </head>
 <body>
     <div id="container">
-        <div id="info">
-            <h1>3D Gaussian Splatting Viewer</h1>
-            <p id="status">Loading viewer...</p>
-            <div id="loading-progress"></div>
-            <div id="error"></div>
-        </div>
         <canvas id="canvas"></canvas>
+        <div id="loading">Loading Gaussian Splat Model...</div>
+        <div id="info">
+            Mouse: Left click + drag to rotate | Right click + drag to pan | Scroll to zoom
+        </div>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script>
-        // Try to load the library from different sources
-        async function loadLibrary() {
-            const statusElement = document.getElementById('status');
-            const errorElement = document.getElementById('error');
+        // Main application
+        class GaussianSplatViewer {
+            constructor() {
+                this.canvas = document.getElementById('canvas');
+                this.loadingElement = document.getElementById('loading');
+                
+                this.scene = new THREE.Scene();
+                this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                
+                this.camera.position.z = 5;
+                
+                this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+                this.controls.enableDamping = true;
+                this.controls.dampingFactor = 0.05;
+                
+                this.setupLights();
+                this.setupEventListeners();
+                this.loadSplatFile();
+                this.animate();
+            }
             
-            // Array of possible URLs to try
-            const libraryUrls = [
-                "https://cdn.jsdelivr.net/npm/gsplat/dist/gsplat.js",
-                "https://unpkg.com/gsplat/dist/gsplat.js",
-                "https://cdn.jsdelivr.net/npm/@gsplat/viewer/dist/gsplat-viewer.js",
-                "https://cdn.jsdelivr.net/npm/three-splat/build/three-splat.min.js"
-            ];
+            setupLights() {
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+                this.scene.add(ambientLight);
+                
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(1, 1, 1);
+                this.scene.add(directionalLight);
+            }
             
-            for (const url of libraryUrls) {
+            setupEventListeners() {
+                window.addEventListener('resize', () => {
+                    this.camera.aspect = window.innerWidth / window.innerHeight;
+                    this.camera.updateProjectionMatrix();
+                    this.renderer.setSize(window.innerWidth, window.innerHeight);
+                });
+            }
+            
+            async loadSplatFile() {
                 try {
-                    statusElement.textContent = `Trying to load library from ${url}...`;
-                    await loadScript(url);
-                    statusElement.textContent = "Library loaded successfully!";
-                    return true;
+                    const url = "https://huggingface.co/cakewalk/splat-data/resolve/main/nike.splat";
+                    const response = await fetch(url);
+                    
+                    if (!response.ok) {
+                        throw new Error(`Failed to load splat file: ${response.status} ${response.statusText}`);
+                    }
+                    
+                    const data = await response.arrayBuffer();
+                    this.processSplatData(data);
+                    
+                    this.loadingElement.style.display = 'none';
                 } catch (error) {
-                    console.warn(`Failed to load from ${url}, trying next source...`);
+                    console.error("Error loading splat file:", error);
+                    this.loadingElement.textContent = `Error: ${error.message}`;
                 }
             }
             
-            // If we get here, all sources failed
-            throw new Error("Could not load Gaussian Splatting library from any source. Please check your connection and try again.");
-        }
-        
-        function loadScript(url) {
-            return new Promise((resolve, reject) => {
-                const script = document.createElement('script');
-                script.src = url;
-                script.onload = resolve;
-                script.onerror = () => reject(new Error(`Failed to load script: ${url}`));
-                document.head.appendChild(script);
+            processSplatData(data) {
+                // Parse the binary splat file
+                const dataView = new DataView(data);
                 
-                // Set a timeout to prevent hanging forever on slow connections
-                setTimeout(() => {
-                    if (!script.loaded) {
-                        reject(new Error(`Timeout loading script: ${url}`));
+                // Log the total buffer size to help with debugging
+                console.log(`Total buffer size: ${data.byteLength} bytes`);
+                
+                // Try a completely different parsing approach
+                // Let's try to detect the format by examining the first few bytes
+                
+                // For debug purposes, let's print some values
+                console.log(`First few bytes as float32:`);
+                for (let i = 0; i < 40; i += 4) {
+                    if (i + 4 <= data.byteLength) {
+                        console.log(`Offset ${i}: ${dataView.getFloat32(i, true)}`);
                     }
-                }, 10000); // 10 second timeout
-            });
-        }
-
-        async function initViewer() {
-            const canvas = document.getElementById('canvas');
-            const statusElement = document.getElementById('status');
-            const progressElement = document.getElementById('loading-progress');
-            const infoElement = document.getElementById('info');
-            const errorElement = document.getElementById('error');
-
-            try {
-                // First try to load the library
-                await loadLibrary();
+                }
                 
-                // Check which library we have loaded
-                let renderer, scene, camera, controls, loader;
+                // Some splat formats start with a header containing the number of points
+                // Let's check if the first number looks like a reasonable count
+                const possibleCount = dataView.getUint32(0, true);
+                let headerSize = 0;
+                let bytesPerSplat = 0;
+                let numSplats = 0;
                 
-                if (typeof GSplat !== 'undefined') {
-                    // Standard GSplat library
-                    statusElement.textContent = "Initializing GSplat viewer...";
-                    
-                    renderer = new GSplat.WebGLRenderer(canvas);
-                    scene = new GSplat.Scene();
-                    camera = new GSplat.PerspectiveCamera();
-                    controls = new GSplat.OrbitControls(camera, canvas);
-                    loader = new GSplat.SplatLoader();
-                    
-                } else if (typeof GaussianSplatting !== 'undefined') {
-                    // Alternative implementation
-                    statusElement.textContent = "Initializing GaussianSplatting viewer...";
-                    
-                    renderer = new GaussianSplatting.Renderer(canvas);
-                    scene = new GaussianSplatting.Scene();
-                    camera = new GaussianSplatting.Camera();
-                    controls = new GaussianSplatting.Controls(camera, canvas);
-                    loader = new GaussianSplatting.Loader();
-                    
-                } else if (typeof ThreeSplat !== 'undefined') {
-                    // ThreeSplat implementation
-                    statusElement.textContent = "Initializing ThreeSplat viewer...";
-                    
-                    // ThreeSplat uses Three.js
-                    const THREE = window.THREE;
-                    renderer = new THREE.WebGLRenderer({ canvas });
-                    scene = new THREE.Scene();
-                    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-                    controls = new THREE.OrbitControls(camera, canvas);
-                    loader = new ThreeSplat.Loader();
-                    
+                console.log(`Possible count from first 4 bytes: ${possibleCount}`);
+                
+                // Try to determine if we have a header and what the format is
+                if (possibleCount > 0 && possibleCount < 10000000) { // Reasonable number of points
+                    headerSize = 4;
+                    // Try to determine bytes per splat
+                    bytesPerSplat = (data.byteLength - headerSize) / possibleCount;
+                    numSplats = possibleCount;
+                    console.log(`Detected header with ${numSplats} points, ${bytesPerSplat} bytes per splat`);
                 } else {
-                    throw new Error("No compatible Gaussian Splatting library was loaded.");
-                }
-
-                // Set up camera
-                camera.position.set(0, 0, 3);
-                
-                // URL to the Nike splat file
-                const splatUrl = "https://huggingface.co/cakewalk/splat-data/resolve/main/nike.splat";
-                
-                // Display loading status
-                statusElement.textContent = 'Loading Nike Gaussian Splat...';
-                progressElement.textContent = 'Preparing download...';
-                
-                // Add progress tracking (implementation depends on which library was loaded)
-                if (loader.addEventListener) {
-                    loader.addEventListener('progress', (e) => {
-                        const percent = Math.round(e.loaded / e.total * 100);
-                        progressElement.textContent = `Downloaded: ${percent}%`;
-                    });
-                }
-                
-                // Load the gaussian splat
-                statusElement.textContent = 'Downloading Gaussian Splat data...';
-                
-                let splat;
-                if (loader.loadAsync) {
-                    splat = await loader.loadAsync(splatUrl);
-                } else if (loader.load) {
-                    splat = await new Promise((resolve, reject) => {
-                        loader.load(splatUrl, 
-                            (result) => resolve(result),
-                            (progress) => {
-                                const percent = Math.round(progress.loaded / progress.total * 100);
-                                progressElement.textContent = `Downloaded: ${percent}%`;
-                            },
-                            (error) => reject(error)
-                        );
-                    });
-                } else {
-                    throw new Error("Unsupported loader implementation");
-                }
-                
-                statusElement.textContent = 'Processing Gaussian Splat data...';
-                
-                // Add to scene (implementation depends on which library was loaded)
-                if (scene.add) {
-                    scene.add(splat);
-                } else if (scene.addSplat) {
-                    scene.addSplat(splat);
-                }
-                
-                // Success message
-                statusElement.textContent = 'Gaussian Splat loaded successfully!';
-                progressElement.textContent = '';
-                
-                // Fade out the info panel after a delay
-                setTimeout(() => {
-                    infoElement.style.opacity = "0";
-                    setTimeout(() => {
-                        infoElement.style.display = "none";
-                    }, 500);
-                }, 2000);
-                
-                // Set initial renderer size
-                if (renderer.setSize) {
-                    renderer.setSize(window.innerWidth, window.innerHeight);
-                }
-                
-                // Animation loop
-                function animate() {
-                    requestAnimationFrame(animate);
-                    if (controls.update) controls.update();
-                    
-                    if (renderer.render) {
-                        renderer.render(scene, camera);
-                    } else if (renderer.draw) {
-                        renderer.draw(scene, camera);
-                    }
-                }
-                
-                // Start the animation loop
-                animate();
-                
-                // Add event to show/hide info on click
-                canvas.addEventListener('click', () => {
-                    if (infoElement.style.display === "none") {
-                        infoElement.style.display = "block";
-                        setTimeout(() => {
-                            infoElement.style.opacity = "1";
-                        }, 0);
-                    } else {
-                        infoElement.style.opacity = "0";
-                        setTimeout(() => {
-                            infoElement.style.display = "none";
-                        }, 500);
-                    }
-                });
-                
-                // Handle window resize
-                window.addEventListener('resize', () => {
-                    if (camera.aspect !== undefined) {
-                        camera.aspect = window.innerWidth / window.innerHeight;
-                        if (camera.updateProjectionMatrix) {
-                            camera.updateProjectionMatrix();
+                    // No header, try common formats: 32, 40 or 48 bytes per splat
+                    const testFormats = [32, 40, 48];
+                    for (const format of testFormats) {
+                        const count = Math.floor(data.byteLength / format);
+                        if (count > 1000) { // At least a reasonable number of points to be a model
+                            bytesPerSplat = format;
+                            numSplats = count;
+                            break;
                         }
                     }
                     
-                    if (renderer.setSize) {
-                        renderer.setSize(window.innerWidth, window.innerHeight);
+                    if (bytesPerSplat === 0) {
+                        // Default fallback
+                        bytesPerSplat = 32;
+                        numSplats = Math.floor(data.byteLength / bytesPerSplat);
                     }
+                    
+                    console.log(`No header detected. Using ${bytesPerSplat} bytes per splat, ${numSplats} points`);
+                }
+                
+                // Arrays to hold splat data - scale according to actual file size
+                const positions = [];
+                const colors = [];
+                const sizes = [];
+                
+                // More conservative approach - only read up to the buffer limit
+                let validPoints = 0;
+                
+                for (let i = 0; i < numSplats; i++) {
+                    const baseOffset = headerSize + i * bytesPerSplat;
+                    
+                    // Check if we have enough buffer left to read a full point
+                    if (baseOffset + 16 >= data.byteLength) break;
+                    
+                    // Read position (3 floats = 12 bytes)
+                    let x = dataView.getFloat32(baseOffset, true);
+                    let y = dataView.getFloat32(baseOffset + 4, true);
+                    let z = dataView.getFloat32(baseOffset + 8, true);
+                    
+                    // Skip points with invalid positions
+                    if (isNaN(x) || isNaN(y) || isNaN(z) || 
+                        !isFinite(x) || !isFinite(y) || !isFinite(z)) {
+                        continue;
+                    }
+                    
+                    // Apply reasonable bounds to avoid extreme outliers
+                    const maxCoord = 1000;
+                    if (Math.abs(x) > maxCoord || Math.abs(y) > maxCoord || Math.abs(z) > maxCoord) {
+                        continue;
+                    }
+                    
+                    positions.push(x, y, z);
+                    
+                    // Read color (try different offsets based on format)
+                    let colorOffset = baseOffset + 12;
+                    if (bytesPerSplat >= 40) {
+                        // In larger formats, color might be after more data
+                        colorOffset = baseOffset + bytesPerSplat - 4; // Assuming color is last 4 bytes
+                    }
+                    
+                    // Ensure we don't read past the buffer
+                    if (colorOffset + 3 < data.byteLength) {
+                        const r = dataView.getUint8(colorOffset) / 255;
+                        const g = dataView.getUint8(colorOffset + 1) / 255;
+                        const b = dataView.getUint8(colorOffset + 2) / 255;
+                        const a = (colorOffset + 3 < data.byteLength) ? 
+                                  dataView.getUint8(colorOffset + 3) / 255 : 1.0;
+                        
+                        colors.push(r, g, b, a);
+                    } else {
+                        // Default color if we can't read it
+                        colors.push(1, 1, 1, 1);
+                    }
+                    
+                    // For simplicity, use a fixed size for now
+                    sizes.push(0.02);  // Use a constant size that will be visible
+                    
+                    validPoints++;
+                    
+                    // Debug: Print some sample data points
+                    if (i < 5 || validPoints % 10000 === 0) {
+                        console.log(`Point ${i}: pos=(${x},${y},${z})`);
+                    }
+                }
+                
+                console.log(`Found ${validPoints} valid points out of ${numSplats}`);
+                
+                if (validPoints === 0) {
+                    this.loadingElement.textContent = "Error: No valid points found in the data";
+                    return;
+                }
+                
+                // Create geometry with attributes - now using normal arrays instead of typed arrays
+                const geometry = new THREE.BufferGeometry();
+                geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+                geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 4));
+                
+                // Force computation of bounding sphere with valid values
+                geometry.computeBoundingSphere();
+                
+                // Create a simpler PointsMaterial for better visibility
+                const material = new THREE.PointsMaterial({
+                    size: 0.05,  // Make points larger by default
+                    sizeAttenuation: true,
+                    vertexColors: true,
+                    transparent: true,
+                    opacity: 0.8,
+                    alphaTest: 0.1
                 });
                 
-            } catch (error) {
-                console.error("Error:", error);
-                statusElement.textContent = "Error occurred";
-                errorElement.textContent = error.message || "Unknown error";
+                // Create the point cloud with our custom material
+                const pointCloud = new THREE.Points(geometry, material);
+                this.scene.add(pointCloud);
+                
+                // Center the camera on the splat model, handling potential errors
+                try {
+                    const box = new THREE.Box3().setFromObject(pointCloud);
+                    if (!isNaN(box.min.x) && !isNaN(box.max.x)) {
+                        const center = box.getCenter(new THREE.Vector3());
+                        const size = box.getSize(new THREE.Vector3());
+                        
+                        const maxDim = Math.max(size.x, size.y, size.z);
+                        const fov = this.camera.fov * (Math.PI / 180);
+                        const cameraDistance = maxDim / (2 * Math.tan(fov / 2));
+                        
+                        console.log(`Model center: (${center.x}, ${center.y}, ${center.z})`);
+                        console.log(`Model size: ${maxDim}`);
+                        
+                        this.camera.position.copy(center);
+                        this.camera.position.z += Math.max(5, cameraDistance * 1.5);
+                        this.controls.target.copy(center);
+                    } else {
+                        console.warn("Could not compute valid bounding box, using default camera position");
+                        this.camera.position.set(0, 0, 5);
+                        this.controls.target.set(0, 0, 0);
+                    }
+                } catch (error) {
+                    console.error("Error positioning camera:", error);
+                    // Use default position as fallback
+                    this.camera.position.set(0, 0, 5);
+                    this.controls.target.set(0, 0, 0);
+                }
+            }
+            
+            animate() {
+                requestAnimationFrame(this.animate.bind(this));
+                this.controls.update();
+                this.renderer.render(this.scene, this.camera);
             }
         }
 
-        // Start the initialization when the page loads
-        window.addEventListener('load', initViewer);
+        // OrbitControls implementation
+        class OrbitControls {
+            constructor(camera, domElement) {
+                this.camera = camera;
+                this.domElement = domElement;
+                this.target = new THREE.Vector3();
+                this.enableDamping = false;
+                this.dampingFactor = 0.05;
+                
+                this.rotateSpeed = 1.0;
+                this.panSpeed = 0.5;
+                this.zoomSpeed = 1.0;
+                
+                this.rotateStart = new THREE.Vector2();
+                this.rotateEnd = new THREE.Vector2();
+                this.rotateDelta = new THREE.Vector2();
+                
+                this.panStart = new THREE.Vector2();
+                this.panEnd = new THREE.Vector2();
+                this.panDelta = new THREE.Vector2();
+                
+                this.spherical = new THREE.Spherical();
+                this.sphericalDelta = new THREE.Spherical();
+                
+                this.scale = 1;
+                this.panOffset = new THREE.Vector3();
+                
+                this.STATE = {
+                    NONE: -1,
+                    ROTATE: 0,
+                    PAN: 1
+                };
+                this.state = this.STATE.NONE;
+                
+                this.domElement.addEventListener('mousedown', this.onMouseDown.bind(this));
+                this.domElement.addEventListener('wheel', this.onMouseWheel.bind(this));
+                document.addEventListener('mousemove', this.onMouseMove.bind(this));
+                document.addEventListener('mouseup', this.onMouseUp.bind(this));
+                
+                this.update();
+            }
+            
+            onMouseDown(event) {
+                event.preventDefault();
+                
+                if (event.button === 0) {
+                    this.state = this.STATE.ROTATE;
+                    this.rotateStart.set(event.clientX, event.clientY);
+                } else if (event.button === 2) {
+                    this.state = this.STATE.PAN;
+                    this.panStart.set(event.clientX, event.clientY);
+                }
+            }
+            
+            onMouseMove(event) {
+                if (this.state === this.STATE.ROTATE) {
+                    this.rotateEnd.set(event.clientX, event.clientY);
+                    this.rotateDelta.subVectors(this.rotateEnd, this.rotateStart);
+                    
+                    this.rotateLeft(2 * Math.PI * this.rotateDelta.x / this.domElement.clientWidth * this.rotateSpeed);
+                    this.rotateUp(2 * Math.PI * this.rotateDelta.y / this.domElement.clientHeight * this.rotateSpeed);
+                    
+                    this.rotateStart.copy(this.rotateEnd);
+                } else if (this.state === this.STATE.PAN) {
+                    this.panEnd.set(event.clientX, event.clientY);
+                    this.panDelta.subVectors(this.panEnd, this.panStart);
+                    
+                    this.pan(this.panDelta.x, this.panDelta.y);
+                    
+                    this.panStart.copy(this.panEnd);
+                }
+            }
+            
+            onMouseUp() {
+                this.state = this.STATE.NONE;
+            }
+            
+            onMouseWheel(event) {
+                event.preventDefault();
+                event.stopPropagation();
+                
+                if (event.deltaY < 0) {
+                    this.dollyIn(this.getZoomScale());
+                } else if (event.deltaY > 0) {
+                    this.dollyOut(this.getZoomScale());
+                }
+            }
+            
+            getZoomScale() {
+                return Math.pow(0.95, this.zoomSpeed);
+            }
+            
+            rotateLeft(angle) {
+                this.sphericalDelta.theta -= angle;
+            }
+            
+            rotateUp(angle) {
+                this.sphericalDelta.phi -= angle;
+            }
+            
+            dollyIn(dollyScale) {
+                this.scale /= dollyScale;
+            }
+            
+            dollyOut(dollyScale) {
+                this.scale *= dollyScale;
+            }
+            
+            pan(deltaX, deltaY) {
+                const distance = this.camera.position.distanceTo(this.target);
+                const height = 2 * distance * Math.tan(this.camera.fov * Math.PI / 360);
+                const width = height * this.camera.aspect;
+                
+                deltaX *= width / this.domElement.clientWidth * this.panSpeed;
+                deltaY *= height / this.domElement.clientHeight * this.panSpeed;
+                
+                const cameraW = this.camera.up.clone().cross(this.camera.position.clone().sub(this.target)).normalize();
+                const cameraU = cameraW.clone().cross(this.camera.up).normalize();
+                
+                this.panOffset.copy(cameraW.multiplyScalar(-deltaX));
+                this.panOffset.add(cameraU.multiplyScalar(deltaY));
+            }
+            
+            update() {
+                const offset = new THREE.Vector3();
+                
+                offset.copy(this.camera.position).sub(this.target);
+                
+                // Convert to spherical coordinates
+                this.spherical.setFromVector3(offset);
+                
+                // Apply rotation
+                this.spherical.theta += this.sphericalDelta.theta;
+                this.spherical.phi += this.sphericalDelta.phi;
+                
+                // Restrict phi to be between desired limits
+                this.spherical.phi = Math.max(0.01, Math.min(Math.PI - 0.01, this.spherical.phi));
+                
+                // Apply scale
+                this.spherical.radius *= this.scale;
+                
+                // Apply pan
+                this.target.add(this.panOffset);
+                
+                // Convert back to Cartesian coordinates
+                offset.setFromSpherical(this.spherical);
+                
+                // Apply position
+                this.camera.position.copy(this.target).add(offset);
+                this.camera.lookAt(this.target);
+                
+                // Reset changes
+                this.sphericalDelta.set(0, 0, 0);
+                this.scale = 1;
+                this.panOffset.set(0, 0, 0);
+                
+                return true;
+            }
+        }
+
+        // Wait for the DOM to load before starting the application
+        document.addEventListener('DOMContentLoaded', () => {
+            new GaussianSplatViewer();
+        });
+        
+        // Prevent context menu on right-click for better controls
+        document.addEventListener('contextmenu', (event) => {
+            event.preventDefault();
+        });
     </script>
 </body>
 </html>
