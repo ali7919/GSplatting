@@ -72,7 +72,34 @@
     </div>
 
     <script>
-        // Let's ensure we properly handle the GSplat library loading
+        // Try to load the library from different sources
+        async function loadLibrary() {
+            const statusElement = document.getElementById('status');
+            const errorElement = document.getElementById('error');
+            
+            // Array of possible URLs to try
+            const libraryUrls = [
+                "https://cdn.jsdelivr.net/npm/gsplat/dist/gsplat.js",
+                "https://unpkg.com/gsplat/dist/gsplat.js",
+                "https://cdn.jsdelivr.net/npm/@gsplat/viewer/dist/gsplat-viewer.js",
+                "https://cdn.jsdelivr.net/npm/three-splat/build/three-splat.min.js"
+            ];
+            
+            for (const url of libraryUrls) {
+                try {
+                    statusElement.textContent = `Trying to load library from ${url}...`;
+                    await loadScript(url);
+                    statusElement.textContent = "Library loaded successfully!";
+                    return true;
+                } catch (error) {
+                    console.warn(`Failed to load from ${url}, trying next source...`);
+                }
+            }
+            
+            // If we get here, all sources failed
+            throw new Error("Could not load Gaussian Splatting library from any source. Please check your connection and try again.");
+        }
+        
         function loadScript(url) {
             return new Promise((resolve, reject) => {
                 const script = document.createElement('script');
@@ -80,6 +107,13 @@
                 script.onload = resolve;
                 script.onerror = () => reject(new Error(`Failed to load script: ${url}`));
                 document.head.appendChild(script);
+                
+                // Set a timeout to prevent hanging forever on slow connections
+                setTimeout(() => {
+                    if (!script.loaded) {
+                        reject(new Error(`Timeout loading script: ${url}`));
+                    }
+                }, 10000); // 10 second timeout
             });
         }
 
@@ -91,22 +125,47 @@
             const errorElement = document.getElementById('error');
 
             try {
-                // First load the GSplat library
-                statusElement.textContent = "Loading GSplat library...";
-                await loadScript("https://unpkg.com/gsplat@0.3.9/dist/gsplat.js");
+                // First try to load the library
+                await loadLibrary();
                 
-                // Check if GSplat was loaded correctly
-                if (typeof GSplat === 'undefined') {
-                    throw new Error("GSplat library failed to initialize");
+                // Check which library we have loaded
+                let renderer, scene, camera, controls, loader;
+                
+                if (typeof GSplat !== 'undefined') {
+                    // Standard GSplat library
+                    statusElement.textContent = "Initializing GSplat viewer...";
+                    
+                    renderer = new GSplat.WebGLRenderer(canvas);
+                    scene = new GSplat.Scene();
+                    camera = new GSplat.PerspectiveCamera();
+                    controls = new GSplat.OrbitControls(camera, canvas);
+                    loader = new GSplat.SplatLoader();
+                    
+                } else if (typeof GaussianSplatting !== 'undefined') {
+                    // Alternative implementation
+                    statusElement.textContent = "Initializing GaussianSplatting viewer...";
+                    
+                    renderer = new GaussianSplatting.Renderer(canvas);
+                    scene = new GaussianSplatting.Scene();
+                    camera = new GaussianSplatting.Camera();
+                    controls = new GaussianSplatting.Controls(camera, canvas);
+                    loader = new GaussianSplatting.Loader();
+                    
+                } else if (typeof ThreeSplat !== 'undefined') {
+                    // ThreeSplat implementation
+                    statusElement.textContent = "Initializing ThreeSplat viewer...";
+                    
+                    // ThreeSplat uses Three.js
+                    const THREE = window.THREE;
+                    renderer = new THREE.WebGLRenderer({ canvas });
+                    scene = new THREE.Scene();
+                    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                    controls = new THREE.OrbitControls(camera, canvas);
+                    loader = new ThreeSplat.Loader();
+                    
+                } else {
+                    throw new Error("No compatible Gaussian Splatting library was loaded.");
                 }
-
-                statusElement.textContent = "Initializing viewer...";
-
-                // Initialize the renderer
-                const renderer = new GSplat.WebGLRenderer(canvas);
-                const scene = new GSplat.Scene();
-                const camera = new GSplat.PerspectiveCamera();
-                const controls = new GSplat.OrbitControls(camera, canvas);
 
                 // Set up camera
                 camera.position.set(0, 0, 3);
@@ -118,21 +177,43 @@
                 statusElement.textContent = 'Loading Nike Gaussian Splat...';
                 progressElement.textContent = 'Preparing download...';
                 
-                // Load the splat
-                const loader = new GSplat.SplatLoader();
-                
-                // Add progress tracking
-                loader.addEventListener('progress', (e) => {
-                    const percent = Math.round(e.loaded / e.total * 100);
-                    progressElement.textContent = `Downloaded: ${percent}%`;
-                });
+                // Add progress tracking (implementation depends on which library was loaded)
+                if (loader.addEventListener) {
+                    loader.addEventListener('progress', (e) => {
+                        const percent = Math.round(e.loaded / e.total * 100);
+                        progressElement.textContent = `Downloaded: ${percent}%`;
+                    });
+                }
                 
                 // Load the gaussian splat
                 statusElement.textContent = 'Downloading Gaussian Splat data...';
-                const splat = await loader.loadAsync(splatUrl);
+                
+                let splat;
+                if (loader.loadAsync) {
+                    splat = await loader.loadAsync(splatUrl);
+                } else if (loader.load) {
+                    splat = await new Promise((resolve, reject) => {
+                        loader.load(splatUrl, 
+                            (result) => resolve(result),
+                            (progress) => {
+                                const percent = Math.round(progress.loaded / progress.total * 100);
+                                progressElement.textContent = `Downloaded: ${percent}%`;
+                            },
+                            (error) => reject(error)
+                        );
+                    });
+                } else {
+                    throw new Error("Unsupported loader implementation");
+                }
                 
                 statusElement.textContent = 'Processing Gaussian Splat data...';
-                scene.add(splat);
+                
+                // Add to scene (implementation depends on which library was loaded)
+                if (scene.add) {
+                    scene.add(splat);
+                } else if (scene.addSplat) {
+                    scene.addSplat(splat);
+                }
                 
                 // Success message
                 statusElement.textContent = 'Gaussian Splat loaded successfully!';
@@ -147,13 +228,20 @@
                 }, 2000);
                 
                 // Set initial renderer size
-                renderer.setSize(window.innerWidth, window.innerHeight);
+                if (renderer.setSize) {
+                    renderer.setSize(window.innerWidth, window.innerHeight);
+                }
                 
                 // Animation loop
                 function animate() {
                     requestAnimationFrame(animate);
-                    controls.update();
-                    renderer.render(scene, camera);
+                    if (controls.update) controls.update();
+                    
+                    if (renderer.render) {
+                        renderer.render(scene, camera);
+                    } else if (renderer.draw) {
+                        renderer.draw(scene, camera);
+                    }
                 }
                 
                 // Start the animation loop
@@ -176,9 +264,16 @@
                 
                 // Handle window resize
                 window.addEventListener('resize', () => {
-                    camera.aspect = window.innerWidth / window.innerHeight;
-                    camera.updateProjectionMatrix();
-                    renderer.setSize(window.innerWidth, window.innerHeight);
+                    if (camera.aspect !== undefined) {
+                        camera.aspect = window.innerWidth / window.innerHeight;
+                        if (camera.updateProjectionMatrix) {
+                            camera.updateProjectionMatrix();
+                        }
+                    }
+                    
+                    if (renderer.setSize) {
+                        renderer.setSize(window.innerWidth, window.innerHeight);
+                    }
                 });
                 
             } catch (error) {
