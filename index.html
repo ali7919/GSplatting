@@ -1,243 +1,129 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
+
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AR Gaussian Splatting Viewer</title>
-    <style>
-        body, html {
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-            background-color: #000;
-        }
-        
-        canvas {
-            width: 100vw;
-            height: 100vh;
-            display: block;
-        }
-        
-        #ar-button {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 12px 24px;
-            border: none;
-            border-radius: 4px;
-            background: #4285f4;
-            color: white;
-            font-weight: bold;
-            cursor: pointer;
-            z-index: 999;
-        }
-        
-        #ar-button:disabled {
-            background-color: #ccc;
-            color: #666;
-            cursor: not-allowed;
-        }
-        
-        dialog {
-            width: 100%;
-            text-align: center;
-            max-width: 20em;
-            color: white;
-            background-color: rgba(0, 0, 0, 0.7);
-            border: 1px solid #444;
-            border-radius: 8px;
-            padding: 20px;
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            z-index: 1000;
-        }
-        
-        progress {
-            width: 100%;
-            height: 1em;
-            border: none;
-            background-color: #333;
-        }
-        
-        progress::-webkit-progress-bar {
-            background-color: #333;
-            border-radius: 4px;
-        }
-        
-        progress::-webkit-progress-value {
-            background-color: #4285f4;
-            border-radius: 4px;
-        }
-        
-        progress::-moz-progress-bar {
-            background-color: #4285f4;
-            border-radius: 4px;
-        }
-    </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JSFiddle wdn6vasc</title>
+
+  <style>
+    body,
+html {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background-color: #000;
+}
+
+canvas {
+    width: 100vw;
+    height: 100vh;
+}
+
+dialog {
+    width: 100%;
+    text-align: center;
+    max-width: 20em;
+    color: white;
+    background-color: #000;
+    border: none;
+    position: relative;
+    transform: translate(-50%, -50%);
+}
+
+#progress-container {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+}
+
+progress {
+    width: 100%;
+    height: 1em;
+    border: none;
+    background-color: #fff;
+    color: #eee;
+}
+
+progress::-webkit-progress-bar {
+    background-color: #333;
+}
+
+progress::-webkit-progress-value {
+    background-color: #eee;
+}
+
+progress::-moz-progress-bar {
+    background-color: #eee;
+}
+
+  </style>
+
+  
 </head>
 <body>
-    <button id="ar-button" disabled>Enter AR</button>
-    
-    <dialog open id="progress-dialog">
-        <p><label for="progress-indicator">Loading SPLAT model...</label></p>
-        <progress max="100" id="progress-indicator"></progress>
-    </dialog>
-    
-    <canvas id="canvas"></canvas>
-    
-    <script type="module">
-        // Import libraries
-        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.module.js';
-        import { ARButton } from 'https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/webxr/ARButton.js';
-        import * as SPLAT from "https://cdn.jsdelivr.net/npm/gsplat@latest";
-        
-        // UI Elements
-        const canvas = document.getElementById("canvas");
-        const progressDialog = document.getElementById("progress-dialog");
-        const progressIndicator = document.getElementById("progress-indicator");
-        const arButton = document.getElementById("ar-button");
-        
-        // Three.js setup
-        const renderer = new THREE.WebGLRenderer({ 
-            antialias: true, 
-            alpha: true,
-            canvas: canvas 
-        });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(window.devicePixelRatio);
-        renderer.xr.enabled = true;
-        
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        
-        // Lighting
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-        scene.add(ambientLight);
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-        directionalLight.position.set(0, 1, 0);
-        scene.add(directionalLight);
-        
-        // SPLAT setup
-        const splatScene = new SPLAT.Scene();
-        const splatRenderer = new SPLAT.WebGLRenderer(canvas);
-        // We'll create a wrapper object to hold the SPLAT scene
-        const splatContainer = new THREE.Group();
-        splatContainer.position.set(0, 0, -1); // Position 1m in front of the camera
-        splatContainer.scale.set(0.5, 0.5, 0.5); // Scale to appropriate size
-        scene.add(splatContainer);
-        
-        // Load SPLAT model
-        async function loadSplatModel() {
-            const url = "https://huggingface.co/cakewalk/splat-data/resolve/main/nike.splat";
-            
-            try {
-                await SPLAT.Loader.LoadAsync(url, splatScene, (progress) => {
-                    progressIndicator.value = progress * 100;
-                });
-                progressDialog.close();
-                arButton.disabled = false;
-            } catch (error) {
-                console.error("Failed to load SPLAT model:", error);
-                progressDialog.innerHTML = "<p>Failed to load SPLAT model. Please try again.</p>";
-            }
-        }
-        
-        // Check AR support
-        if ('xr' in navigator) {
-            navigator.xr.isSessionSupported('immersive-ar')
-                .then((supported) => {
-                    if (supported) {
-                        loadSplatModel();
-                    } else {
-                        console.error('AR not supported on this device');
-                        arButton.textContent = 'AR Not Supported';
-                        // Load model anyway to view in non-AR mode
-                        loadSplatModel();
-                    }
-                });
-        } else {
-            console.error('WebXR not supported in this browser');
-            arButton.textContent = 'WebXR Not Supported';
-            // Load model anyway to view in non-AR mode
-            loadSplatModel();
-        }
-        
-        // Start AR session
-        arButton.addEventListener('click', startAR);
-        
-        function startAR() {
-            arButton.style.display = 'none';
-            document.body.appendChild(ARButton.createButton(renderer, {
-                requiredFeatures: ['hit-test'],
-                optionalFeatures: ['dom-overlay'],
-                domOverlay: { root: document.body }
-            }));
-            
-            // Set up AR session
-            renderer.xr.addEventListener('sessionstart', () => {
-                console.log("AR session started");
-            });
-            
-            renderer.xr.addEventListener('sessionend', () => {
-                console.log("AR session ended");
-                arButton.style.display = 'block';
-            });
-            
-            // Start animation loop
-            renderer.setAnimationLoop(render);
-        }
-        
-        // Handle window resize
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            splatRenderer.setSize(window.innerWidth, window.innerHeight);
-        });
-        
-        // Fallback non-AR rendering
-        function renderNonAR() {
-            splatRenderer.render(splatScene, camera);
-            requestAnimationFrame(renderNonAR);
-        }
-        
-        // AR rendering function
-        function render(timestamp, frame) {
-            if (frame) {
-                // We're in AR mode
-                const referenceSpace = renderer.xr.getReferenceSpace();
-                const session = renderer.xr.getSession();
-                
-                if (session) {
-                    // Get viewer pose
-                    const pose = frame.getViewerPose(referenceSpace);
-                    if (pose) {
-                        // Use SPLAT renderer to render to offscreen buffer
-                        const view = pose.views[0];
-                        
-                        // Update SPLAT camera to match WebXR camera
-                        const splatCamera = new SPLAT.Camera();
-                        splatCamera.projectionMatrix.fromArray(view.projectionMatrix);
-                        splatCamera.viewMatrix.fromArray(view.transform.inverse.matrix);
-                        
-                        // Render SPLAT scene to temporary buffer
-                        splatRenderer.render(splatScene, splatCamera);
-                        
-                        // Continue with Three.js rendering
-                        renderer.render(scene, camera);
-                    }
-                }
-            } else {
-                // Fallback non-AR rendering
-                splatRenderer.render(splatScene, camera);
-            }
-        }
+  <!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <link rel="stylesheet" href="style.css" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>gsplat.js - Viewer Demo</title>
+    </head>
 
-        // Initial non-AR rendering until AR is launched
-        renderNonAR();
-    </script>
+    <body>
+        <div id="progress-container">
+            <dialog open id="progress-dialog">
+                <p>
+                    <label for="progress-indicator">Loading scene...</label>
+                </p>
+                <progress max="100" id="progress-indicator"></progress>
+            </dialog>
+        </div>
+    
+        <canvas id="canvas"></canvas>
+    </body>
+</html>
+
+
+  <script type="module">
+    import * as SPLAT from "https://cdn.jsdelivr.net/npm/gsplat@latest";
+
+const canvas = document.getElementById("canvas");
+const progressDialog = document.getElementById("progress-dialog");
+const progressIndicator = document.getElementById("progress-indicator");
+
+const renderer = new SPLAT.WebGLRenderer(canvas);
+const scene = new SPLAT.Scene();
+const camera = new SPLAT.Camera();
+const controls = new SPLAT.OrbitControls(camera, canvas);
+
+async function main() {
+    const url = "https://huggingface.co/cakewalk/splat-data/resolve/main/nike.splat";
+
+    await SPLAT.Loader.LoadAsync(url, scene, (progress) => progressIndicator.value = progress * 100);
+    progressDialog.close();
+
+    const handleResize = () => {
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    };
+
+    const frame = () => {
+        controls.update();
+        renderer.render(scene, camera);
+
+        requestAnimationFrame(frame);
+    };
+
+    handleResize();
+    window.addEventListener("resize", handleResize);
+
+    requestAnimationFrame(frame);
+}
+
+main();
+
+  </script>
 </body>
 </html>
