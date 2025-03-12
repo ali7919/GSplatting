@@ -58,6 +58,21 @@ progress::-moz-progress-bar {
     background-color: #eee;
 }
 
+#ar-button {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 12px 20px;
+    background-color: #fff;
+    color: #000;
+    border: none;
+    border-radius: 4px;
+    font-weight: bold;
+    cursor: pointer;
+    display: none;
+}
+
   </style>
 
   
@@ -83,6 +98,7 @@ progress::-moz-progress-bar {
         </div>
     
         <canvas id="canvas"></canvas>
+        <button id="ar-button">Enter AR</button>
     </body>
 </html>
 
@@ -93,27 +109,128 @@ progress::-moz-progress-bar {
 const canvas = document.getElementById("canvas");
 const progressDialog = document.getElementById("progress-dialog");
 const progressIndicator = document.getElementById("progress-indicator");
+const arButton = document.getElementById("ar-button");
 
 const renderer = new SPLAT.WebGLRenderer(canvas);
 const scene = new SPLAT.Scene();
 const camera = new SPLAT.Camera();
 const controls = new SPLAT.OrbitControls(camera, canvas);
 
+let xrSession = null;
+let xrRefSpace = null;
+
+// Check if WebXR is available
+function checkXrSupport() {
+    if ('xr' in navigator) {
+        navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
+            if (supported) {
+                arButton.style.display = 'block';
+            }
+        });
+    }
+}
+
+// Start AR session
+async function startARSession() {
+    if (!xrSession) {
+        try {
+            // Request an AR session
+            xrSession = await navigator.xr.requestSession('immersive-ar', {
+                requiredFeatures: ['local'],
+                optionalFeatures: ['dom-overlay'],
+                domOverlay: { root: document.body }
+            });
+            
+            // Set up XR session
+            const gl = renderer.getContext();
+            await gl.makeXRCompatible();
+            
+            xrSession.updateRenderState({
+                baseLayer: new XRWebGLLayer(xrSession, gl)
+            });
+            
+            // Get reference space
+            xrRefSpace = await xrSession.requestReferenceSpace('local');
+            
+            // Setup session end event
+            xrSession.addEventListener('end', () => {
+                xrSession = null;
+                arButton.textContent = 'Enter AR';
+                requestAnimationFrame(frame);
+            });
+            
+            arButton.textContent = 'Exit AR';
+            
+            // Start AR rendering
+            xrSession.requestAnimationFrame(onXRFrame);
+        } catch (error) {
+            console.error('Error starting AR session:', error);
+        }
+    } else {
+        // End current session
+        xrSession.end();
+    }
+}
+
+// XR frame rendering
+function onXRFrame(time, frame) {
+    if (!xrSession) return;
+    
+    // Queue the next frame
+    xrSession.requestAnimationFrame(onXRFrame);
+    
+    // Get the viewer pose
+    const pose = frame.getViewerPose(xrRefSpace);
+    if (!pose) return;
+    
+    // Get the layer and bind its framebuffer
+    const layer = xrSession.renderState.baseLayer;
+    const gl = renderer.getContext();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+    
+    // For each view (typically just one for AR)
+    for (const view of pose.views) {
+        const viewport = layer.getViewport(view);
+        gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
+        
+        // Update camera with the view and projection matrices
+        camera.projectionMatrix = view.projectionMatrix;
+        camera.viewMatrix = view.transform.inverse.matrix;
+        
+        // Position model in front of user if it's the first frame
+        if (!scene.hasBeenPositioned && scene.getSplatCount() > 0) {
+            scene.position = [0, 0, -1.5]; // Position it 1.5 meters in front
+            scene.scale = [0.5, 0.5, 0.5]; // Scale it down to a reasonable size
+            scene.hasBeenPositioned = true;
+        }
+        
+        // Render the scene
+        renderer.render(scene, camera);
+    }
+}
+
 async function main() {
     const url = "https://huggingface.co/cakewalk/splat-data/resolve/main/nike.splat";
 
     await SPLAT.Loader.LoadAsync(url, scene, (progress) => progressIndicator.value = progress * 100);
     progressDialog.close();
+    
+    // Check AR support
+    checkXrSupport();
+    
+    // Add event listener for AR button
+    arButton.addEventListener('click', startARSession);
 
     const handleResize = () => {
         renderer.setSize(window.innerWidth, window.innerHeight);
     };
 
     const frame = () => {
-        controls.update();
-        renderer.render(scene, camera);
-
-        requestAnimationFrame(frame);
+        if (!xrSession) { // Only run normal render loop when not in XR
+            controls.update();
+            renderer.render(scene, camera);
+            requestAnimationFrame(frame);
+        }
     };
 
     handleResize();
