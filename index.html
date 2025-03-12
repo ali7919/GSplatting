@@ -140,8 +140,19 @@ const arDebug = document.getElementById("ar-debug");
 const arInstructions = document.getElementById("ar-instructions");
 
 // Create WebGL context first with alpha configuration
-const gl = canvas.getContext("webgl2", {alpha: true, premultipliedAlpha: false}) || 
-           canvas.getContext("webgl", {alpha: true, premultipliedAlpha: false});
+const gl = canvas.getContext("webgl2", {
+    alpha: true,
+    premultipliedAlpha: false,
+    antialias: true,
+    preserveDrawingBuffer: false
+}) || 
+canvas.getContext("webgl", {
+    alpha: true,
+    premultipliedAlpha: false,
+    antialias: true,
+    preserveDrawingBuffer: false
+});
+
 if (!gl) {
     console.error("WebGL not supported");
     arDebug.textContent = "Error: WebGL not supported";
@@ -150,8 +161,14 @@ if (!gl) {
 
 // Set up renderer with transparent background
 const renderer = new SPLAT.WebGLRenderer(canvas);
-// If SPLAT.WebGLRenderer has alpha/transparent options, set them here
-// This part depends on the SPLAT library's API
+
+// Try to configure renderer for transparency if the API supports it
+if (renderer.setClearColor) {
+    renderer.setClearColor(0, 0, 0, 0); // Fully transparent
+}
+if (renderer.autoClear !== undefined) {
+    renderer.autoClear = false; // Don't automatically clear the canvas
+}
 
 const scene = new SPLAT.Scene();
 const camera = new SPLAT.Camera();
@@ -192,19 +209,40 @@ function checkXrSupport() {
 async function startARSession() {
     if (!xrSession) {
         try {
-            // Request an AR session with camera passthrough
+            // Show debug info right away to help troubleshooting
+            arDebug.style.display = 'block';
+            arDebug.textContent = "Starting AR session...";
+            
+            // Request an AR session with camera passthrough explicitly listed
             xrSession = await navigator.xr.requestSession('immersive-ar', {
                 requiredFeatures: ['local', 'hit-test'],
                 optionalFeatures: ['dom-overlay', 'camera-access'],
                 domOverlay: { root: document.body }
             });
             
+            arDebug.textContent = "AR session created, setting up WebGL...";
+            
             // Set up XR session with our already created WebGL context
             await gl.makeXRCompatible();
             
-            xrSession.updateRenderState({
-                baseLayer: new XRWebGLLayer(xrSession, gl)
+            // Set important WebGL state for transparency
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+            gl.clearColor(0, 0, 0, 0); // Fully transparent clear color
+            
+            arDebug.textContent = "WebGL configured, creating baseLayer...";
+            
+            // Create a WebXR layer with alpha channel enabled
+            const baseLayer = new XRWebGLLayer(xrSession, gl, { 
+                alpha: true,
+                framebufferScaleFactor: 1.0
             });
+            
+            xrSession.updateRenderState({
+                baseLayer: baseLayer
+            });
+            
+            arDebug.textContent = "Getting reference space...";
             
             // Get reference space
             xrRefSpace = await xrSession.requestReferenceSpace('local');
@@ -234,6 +272,8 @@ async function startARSession() {
             // Start AR rendering
             xrSession.requestAnimationFrame(onXRFrame);
             
+            arDebug.textContent = "AR session ready";
+            
         } catch (error) {
             console.error('Error starting AR session:', error);
             arDebug.textContent = 'Error: ' + error.message;
@@ -250,6 +290,10 @@ function onSelect(event) {
     if (hitTestSource && !placedModelInAR) {
         placedModelInAR = true;
         arInstructions.textContent = "Model placed! Move around to see it from different angles.";
+        
+        // Run test renderer on first tap to see if direct WebGL works
+        setTimeout(runARTestRenderer, 500);
+        
         setTimeout(() => {
             arInstructions.style.display = 'none';
         }, 3000);
@@ -300,9 +344,14 @@ function onXRFrame(time, frame) {
         }
     }
     
-    // Get the layer and bind its framebuffer
+    // Get the layer
     const layer = xrSession.renderState.baseLayer;
+    
+    // Make sure we have the correct framebuffer
     gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+    
+    // This is critical: DO NOT CLEAR the framebuffer in AR mode!
+    // That would erase the camera feed
     
     // For each view (typically just one for AR)
     for (const view of pose.views) {
@@ -313,24 +362,30 @@ function onXRFrame(time, frame) {
         camera.projectionMatrix = view.projectionMatrix;
         camera.viewMatrix = view.transform.inverse.matrix;
         
-        // Debug info
-        if (scene.getSplatCount() > 0) {
-            arDebug.textContent = `Model loaded: ${scene.getSplatCount()} splats. ${modelVisible ? 'Model visible' : 'Model not placed yet'}`;
-        } else {
-            arDebug.textContent = "Model not loaded yet";
-        }
+        // Set appropriate WebGL state for rendering on top of camera feed
+        gl.disable(gl.DEPTH_TEST);
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
         
-        // Apply the model transform if we have content
+        // Debug info with more details about what's happening
+        const debugInfo = [
+            `Splats: ${scene.getSplatCount()}`,
+            `Model visible: ${modelVisible}`,
+            `Placed in AR: ${placedModelInAR}`,
+            `Position: ${scene.position ? JSON.stringify(scene.position) : "none"}`,
+            `View matrix: ${camera.viewMatrix ? "set" : "none"}`,
+            `Projection: ${camera.projectionMatrix ? "set" : "none"}`
+        ].join(" | ");
+        
+        arDebug.textContent = debugInfo;
+        
+        // Apply the model transform if we have content and render directly
         if (modelVisible && scene.getSplatCount() > 0) {
-            // Apply position from hit test or default position
+            // Apply position from hit test
             setSceneTransform(scene, modelMatrix);
             
-            // Don't clear the framebuffer - that would erase the camera feed
-            // Just render the scene on top
+            // Render the scene without clearing the background
             renderer.render(scene, camera);
-        } else {
-            // Don't clear when there's no model - we want to see the camera feed
-            // gl.clear() line removed intentionally
         }
     }
 }
@@ -359,6 +414,29 @@ function setSceneTransform(scene, matrix) {
     // Extract rotation based on the 3x3 rotation part of the matrix
     // (This is simplified; actual implementation would depend on how SPLAT.js handles rotation)
     // The scale is already applied to the matrix
+}
+
+// Add a simple render test function to debug the AR issue
+function runARTestRenderer() {
+    if (!xrSession) return;
+    
+    arDebug.textContent = "Testing direct WebGL rendering...";
+    
+    // Get the current framebuffer
+    const layer = xrSession.renderState.baseLayer;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+    
+    // Set up for a simple colored quad
+    gl.viewport(0, 0, layer.framebufferWidth, layer.framebufferHeight);
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    
+    // Just a simple color overlay to see if direct rendering works
+    gl.clearColor(1.0, 0, 0, 0.5);  // Semi-transparent red
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    
+    arDebug.textContent += " - Test complete";
 }
 
 async function main() {
