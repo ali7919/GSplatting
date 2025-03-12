@@ -1,7 +1,5 @@
 <!DOCTYPE html>
 <html>
-
-<html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -102,32 +100,19 @@ progress::-moz-progress-bar {
   
 </head>
 <body>
-  <!doctype html>
-<html lang="en">
-    <head>
-        <meta charset="utf-8" />
-        <link rel="stylesheet" href="style.css" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>gsplat.js - Viewer Demo</title>
-    </head>
+    <div id="progress-container">
+        <dialog open id="progress-dialog">
+            <p>
+                <label for="progress-indicator">Loading scene...</label>
+            </p>
+            <progress max="100" id="progress-indicator"></progress>
+        </dialog>
+    </div>
 
-    <body>
-        <div id="progress-container">
-            <dialog open id="progress-dialog">
-                <p>
-                    <label for="progress-indicator">Loading scene...</label>
-                </p>
-                <progress max="100" id="progress-indicator"></progress>
-            </dialog>
-        </div>
-    
-        <canvas id="canvas"></canvas>
-        <button id="ar-button">Enter AR</button>
-        <div id="ar-debug"></div>
-        <div id="ar-instructions">Tap on a surface to place the model</div>
-    </body>
-</html>
-
+    <canvas id="canvas"></canvas>
+    <button id="ar-button">Enter AR</button>
+    <div id="ar-debug"></div>
+    <div id="ar-instructions">Tap on a surface to place the model</div>
 
   <script type="module">
     import * as SPLAT from "https://cdn.jsdelivr.net/npm/gsplat@latest";
