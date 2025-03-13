@@ -141,9 +141,14 @@
                 arSession = session;
                 session.addEventListener('end', onSessionEnded);
 
+                // Properly size the canvas for XR
                 const xrLayer = new XRWebGLLayer(session, gl);
                 session.updateRenderState({ baseLayer: xrLayer });
                 referenceSpace = await session.requestReferenceSpace('local-floor');
+
+                // Hide or adjust UI elements for AR mode
+                canvas.style.display = 'none'; // Hide the regular canvas
+                enterARButton.style.display = 'none';
 
                 isARMode = true;
                 isRendering = false; // Stop regular rendering loop
@@ -178,6 +183,12 @@
         function onSessionEnded() {
             arSession = null;
             isARMode = false;
+            
+            // Show UI elements again
+            canvas.style.display = 'block';
+            enterARButton.style.display = 'block';
+            
+            // Restart rendering loop
             isRendering = true;
             requestAnimationFrame(() => {
                 controls.update();
