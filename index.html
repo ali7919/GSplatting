@@ -1,203 +1,129 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
+
+<html>
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>gsplat.js - Viewer Demo with AR</title>
-    <style>
-        body, html {
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-            background-color: #000;
-        }
-        canvas {
-            width: 100vw;
-            height: 100vh;
-        }
-        dialog {
-            width: 100%;
-            text-align: center;
-            max-width: 20em;
-            color: white;
-            background-color: #000;
-            border: none;
-            position: relative;
-            transform: translate(-50%, -50%);
-        }
-        #progress-container {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-        }
-        progress {
-            width: 100%;
-            height: 1em;
-            border: none;
-            background-color: #fff;
-            color: #eee;
-        }
-        progress::-webkit-progress-bar {
-            background-color: #333;
-        }
-        progress::-webkit-progress-value {
-            background-color: #eee;
-        }
-        progress::-moz-progress-bar {
-            background-color: #eee;
-        }
-        #enter-ar {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 10px 20px;
-            font-size: 16px;
-            cursor: pointer;
-        }
-        #enter-ar:disabled {
-            cursor: not-allowed;
-            opacity: 0.5;
-        }
-    </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JSFiddle wdn6vasc</title>
+
+  <style>
+    body,
+html {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background-color: #000;
+}
+
+canvas {
+    width: 100vw;
+    height: 100vh;
+}
+
+dialog {
+    width: 100%;
+    text-align: center;
+    max-width: 20em;
+    color: white;
+    background-color: #000;
+    border: none;
+    position: relative;
+    transform: translate(-50%, -50%);
+}
+
+#progress-container {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+}
+
+progress {
+    width: 100%;
+    height: 1em;
+    border: none;
+    background-color: #fff;
+    color: #eee;
+}
+
+progress::-webkit-progress-bar {
+    background-color: #333;
+}
+
+progress::-webkit-progress-value {
+    background-color: #eee;
+}
+
+progress::-moz-progress-bar {
+    background-color: #eee;
+}
+
+  </style>
+
+  
 </head>
 <body>
-    <div id="progress-container">
-        <dialog open id="progress-dialog">
-            <p><label for="progress-indicator">Loading scene...</label></p>
-            <progress max="100" id="progress-indicator"></progress>
-        </dialog>
-    </div>
-    <canvas id="canvas"></canvas>
-    <button id="enter-ar">Enter AR</button>
+  <!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <link rel="stylesheet" href="style.css" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>gsplat.js - Viewer Demo</title>
+    </head>
 
-    <script type="module">
-        import * as SPLAT from "https://cdn.jsdelivr.net/npm/gsplat@latest";
+    <body>
+        <div id="progress-container">
+            <dialog open id="progress-dialog">
+                <p>
+                    <label for="progress-indicator">Loading scene...</label>
+                </p>
+                <progress max="100" id="progress-indicator"></progress>
+            </dialog>
+        </div>
+    
+        <canvas id="canvas"></canvas>
+    </body>
+</html>
 
-        const canvas = document.getElementById("canvas");
-        const progressDialog = document.getElementById("progress-dialog");
-        const progressIndicator = document.getElementById("progress-indicator");
-        const enterARButton = document.getElementById("enter-ar");
 
-        const renderer = new SPLAT.WebGLRenderer(canvas);
-        const scene = new SPLAT.Scene();
-        const camera = new SPLAT.Camera();
-        const controls = new SPLAT.OrbitControls(camera, canvas);
+  <script type="module">
+    import * as SPLAT from "https://cdn.jsdelivr.net/npm/gsplat@latest";
 
-        // Variables to manage rendering state
-        let isARMode = false;
-        let isRendering = true;
-        let arSession = null;
-        let referenceSpace = null;
-        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+const canvas = document.getElementById("canvas");
+const progressDialog = document.getElementById("progress-dialog");
+const progressIndicator = document.getElementById("progress-indicator");
 
-        async function main() {
-            const url = "https://huggingface.co/cakewalk/splat-data/resolve/main/nike.splat";
-            await SPLAT.Loader.LoadAsync(url, scene, (progress) => progressIndicator.value = progress * 100);
-            progressDialog.close();
+const renderer = new SPLAT.WebGLRenderer(canvas);
+const scene = new SPLAT.Scene();
+const camera = new SPLAT.Camera();
+const controls = new SPLAT.OrbitControls(camera, canvas);
 
-            const handleResize = () => {
-                if (!isARMode) {
-                    renderer.setSize(window.innerWidth, window.innerHeight);
-                }
-            };
+async function main() {
+    const url = "https://huggingface.co/cakewalk/splat-data/resolve/main/nike.splat";
 
-            const frame = () => {
-                if (!isARMode) {
-                    controls.update();
-                    renderer.render(scene, camera);
-                }
-                if (isRendering) {
-                    requestAnimationFrame(frame);
-                }
-            };
+    await SPLAT.Loader.LoadAsync(url, scene, (progress) => progressIndicator.value = progress * 100);
+    progressDialog.close();
 
-            handleResize();
-            window.addEventListener("resize", handleResize);
-            requestAnimationFrame(frame);
+    const handleResize = () => {
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    };
 
-            // Check WebXR support and enable/disable AR button
-            if (navigator.xr) {
-                navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
-                    if (supported) {
-                        enterARButton.addEventListener('click', enterAR);
-                    } else {
-                        enterARButton.disabled = true;
-                    }
-                }).catch(() => {
-                    enterARButton.disabled = true;
-                });
-            } else {
-                enterARButton.disabled = true;
-            }
-        }
+    const frame = () => {
+        controls.update();
+        renderer.render(scene, camera);
 
-        async function enterAR() {
-            try {
-                const session = await navigator.xr.requestSession('immersive-ar', {
-                    requiredFeatures: ['local-floor'],
-                    optionalFeatures: ['dom-overlay', 'light-estimation']
-                });
-                arSession = session;
-                session.addEventListener('end', onSessionEnded);
+        requestAnimationFrame(frame);
+    };
 
-                // Properly size the canvas for XR
-                const xrLayer = new XRWebGLLayer(session, gl);
-                session.updateRenderState({ baseLayer: xrLayer });
-                referenceSpace = await session.requestReferenceSpace('local-floor');
+    handleResize();
+    window.addEventListener("resize", handleResize);
 
-                // Hide or adjust UI elements for AR mode
-                canvas.style.display = 'none'; // Hide the regular canvas
-                enterARButton.style.display = 'none';
+    requestAnimationFrame(frame);
+}
 
-                isARMode = true;
-                isRendering = false; // Stop regular rendering loop
-                session.requestAnimationFrame(onXRFrame);
-            } catch (error) {
-                console.error('Failed to start AR session:', error);
-                enterARButton.disabled = true;
-            }
-        }
+main();
 
-        function onXRFrame(time, frame) {
-            const session = frame.session;
-            const pose = frame.getViewerPose(referenceSpace);
-
-            if (pose) {
-                for (const view of pose.views) {
-                    const viewport = session.renderState.baseLayer.getViewport(view);
-                    gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
-                    gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
-
-                    // Update camera matrices
-                    camera.matrix.fromArray(view.transform.matrix);
-                    camera.projectionMatrix.fromArray(view.projectionMatrix);
-
-                    // Render the scene
-                    renderer.render(scene, camera);
-                }
-            }
-            session.requestAnimationFrame(onXRFrame);
-        }
-
-        function onSessionEnded() {
-            arSession = null;
-            isARMode = false;
-            
-            // Show UI elements again
-            canvas.style.display = 'block';
-            enterARButton.style.display = 'block';
-            
-            // Restart rendering loop
-            isRendering = true;
-            requestAnimationFrame(() => {
-                controls.update();
-                renderer.render(scene, camera);
-                requestAnimationFrame(frame);
-            });
-        }
-
-        main();
-    </script>
+  </script>
 </body>
 </html>
