@@ -5,7 +5,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>JSFiddle wdn6vasc</title>
+  <title>Gaussian Splat AR Viewer</title>
 
   <style>
     body,
@@ -58,6 +58,27 @@ progress::-moz-progress-bar {
     background-color: #eee;
 }
 
+#ar-button {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 12px 24px;
+    background: #fff;
+    color: #000;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+    display: none;
+}
+
+#ar-button:disabled {
+    background: #666;
+    color: #ccc;
+    cursor: not-allowed;
+}
+
   </style>
 
   
@@ -83,6 +104,7 @@ progress::-moz-progress-bar {
         </div>
     
         <canvas id="canvas"></canvas>
+        <button id="ar-button">Enter AR</button>
     </body>
 </html>
 
@@ -93,17 +115,78 @@ progress::-moz-progress-bar {
 const canvas = document.getElementById("canvas");
 const progressDialog = document.getElementById("progress-dialog");
 const progressIndicator = document.getElementById("progress-indicator");
+const arButton = document.getElementById("ar-button");
 
 const renderer = new SPLAT.WebGLRenderer(canvas);
 const scene = new SPLAT.Scene();
 const camera = new SPLAT.Camera();
 const controls = new SPLAT.OrbitControls(camera, canvas);
 
+// Check if WebXR is supported
+async function checkXRSupport() {
+    if ('xr' in navigator) {
+        try {
+            const isSupported = await navigator.xr.isSessionSupported('immersive-ar');
+            arButton.style.display = isSupported ? 'block' : 'none';
+            arButton.disabled = !isSupported;
+        } catch (e) {
+            console.error('Error checking AR support:', e);
+            arButton.style.display = 'none';
+        }
+    } else {
+        console.log('WebXR not supported');
+        arButton.style.display = 'none';
+    }
+}
+
+async function startARSession() {
+    try {
+        const session = await navigator.xr.requestSession('immersive-ar', {
+            requiredFeatures: ['hit-test']
+        });
+
+        // Set up WebXR rendering
+        const xrRenderer = renderer.getContext();
+        await xrRenderer.makeXRCompatible();
+
+        session.updateRenderState({
+            baseLayer: new XRWebGLLayer(session, xrRenderer)
+        });
+
+        // Handle AR session frame updates
+        session.requestAnimationFrame(onXRFrame);
+
+        // Handle session end
+        session.addEventListener('end', () => {
+            console.log('AR session ended');
+        });
+
+    } catch (e) {
+        console.error('Error starting AR session:', e);
+        alert('Failed to start AR session');
+    }
+}
+
+function onXRFrame(time, frame) {
+    const session = frame.session;
+    session.requestAnimationFrame(onXRFrame);
+
+    const pose = frame.getViewerPose(referenceSpace);
+    if (pose) {
+        const view = pose.views[0];
+        const viewport = session.renderState.baseLayer.getViewport(view);
+        renderer.render(scene, camera);
+    }
+}
+
 async function main() {
     const url = "https://huggingface.co/cakewalk/splat-data/resolve/main/nike.splat";
 
     await SPLAT.Loader.LoadAsync(url, scene, (progress) => progressIndicator.value = progress * 100);
     progressDialog.close();
+
+    // Check AR support after loading the model
+    await checkXRSupport();
 
     const handleResize = () => {
         renderer.setSize(window.innerWidth, window.innerHeight);
@@ -112,12 +195,12 @@ async function main() {
     const frame = () => {
         controls.update();
         renderer.render(scene, camera);
-
         requestAnimationFrame(frame);
     };
 
     handleResize();
     window.addEventListener("resize", handleResize);
+    arButton.addEventListener('click', startARSession);
 
     requestAnimationFrame(frame);
 }
