@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 
+<html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,68 +9,95 @@
 
   <style>
     body,
-    html {
-        margin: 0;
-        padding: 0;
-        overflow: hidden;
-        background-color: #000;
-    }
+html {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background-color: #000;
+    font-family: sans-serif; /* Add a default font for better readability */
+}
 
-    canvas {
-        width: 100vw;
-        height: 100vh;
-    }
+canvas {
+    width: 100vw;
+    height: 100vh;
+    display: block; /* Prevent scrollbar issues */
+}
 
-    dialog {
-        width: 100%;
-        text-align: center;
-        max-width: 20em;
-        color: white;
-        background-color: #000;
-        border: none;
-        position: relative;
-        transform: translate(-50%, -50%);
-    }
+dialog {
+    width: 100%;
+    text-align: center;
+    max-width: 20em;
+    color: white;
+    background-color: #000;
+    border: none;
+    position: relative;
+    transform: translate(-50%, -50%);
+}
 
-    #progress-container {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-    }
+#progress-container {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+}
 
-    progress {
-        width: 100%;
-        height: 1em;
-        border: none;
-        background-color: #fff;
-        color: #eee;
-    }
+progress {
+    width: 100%;
+    height: 1em;
+    border: none;
+    background-color: #fff;
+    color: #eee;
+}
 
-    progress::-webkit-progress-bar {
-        background-color: #333;
-    }
+progress::-webkit-progress-bar {
+    background-color: #333;
+}
 
-    progress::-webkit-progress-value {
-        background-color: #eee;
-    }
+progress::-webkit-progress-value {
+    background-color: #eee;
+}
 
-    progress::-moz-progress-bar {
-        background-color: #eee;
-    }
+progress::-moz-progress-bar {
+    background-color: #eee;
+}
 
-    #ar-button {
-        position: absolute;
-        bottom: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        padding: 10px 20px;
-        background-color: #4CAF50;
-        color: white;
-        border: none;
-        border-radius: 5px;
-        cursor: pointer;
-        z-index: 10; /* Ensure it's above the canvas */
-    }
+#ar-button {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 10px 20px;
+    background-color: #eee;
+    color: #000;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+    z-index: 10; /* Ensure button is above canvas */
+}
+
+#ar-button:hover {
+    background-color: #ddd;
+}
+
+#ar-button:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+}
+
+#ar-message {
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: white;
+    background-color: rgba(0, 0, 0, 0.7);
+    padding: 10px 20px;
+    border-radius: 5px;
+    z-index: 10;
+    display: none; /* Initially hidden */
+}
+
+
   </style>
 
 
@@ -93,8 +121,10 @@
                 <progress max="100" id="progress-indicator"></progress>
             </dialog>
         </div>
-        <button id="ar-button">Enter AR</button>
+
         <canvas id="canvas"></canvas>
+        <button id="ar-button">Enter AR</button>
+        <div id="ar-message"></div>
     </body>
 </html>
 
@@ -102,137 +132,128 @@
   <script type="module">
     import * as SPLAT from "https://cdn.jsdelivr.net/npm/gsplat@latest";
 
-    const canvas = document.getElementById("canvas");
-    const progressDialog = document.getElementById("progress-dialog");
-    const progressIndicator = document.getElementById("progress-indicator");
-    const arButton = document.getElementById("ar-button");
+const canvas = document.getElementById("canvas");
+const progressDialog = document.getElementById("progress-dialog");
+const progressIndicator = document.getElementById("progress-indicator");
+const arButton = document.getElementById("ar-button");
+const arMessage = document.getElementById("ar-message");
 
-    const renderer = new SPLAT.WebGLRenderer(canvas);
-    const scene = new SPLAT.Scene();
-    const camera = new SPLAT.Camera();
-    const controls = new SPLAT.OrbitControls(camera, canvas);
-    let xrSession = null;
-    let xrReferenceSpace = null;
-    let gl = null;
+let xrSession = null;
+let xrReferenceSpace = null;
 
-    async function main() {
-        const url = "https://huggingface.co/cakewalk/splat-data/resolve/main/nike.splat";
+const renderer = new SPLAT.WebGLRenderer(canvas);
+const scene = new SPLAT.Scene();
+const camera = new SPLAT.Camera();
+const controls = new SPLAT.OrbitControls(camera, canvas);
 
-        await SPLAT.Loader.LoadAsync(url, scene, (progress) => progressIndicator.value = progress * 100);
-        progressDialog.close();
+async function main() {
+    const url = "https://huggingface.co/cakewalk/splat-data/resolve/main/nike.splat";
 
-        const handleResize = () => {
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            if (xrSession) {  //If there is a session, we should adjust to the session's viewport
-                gl.bindFramebuffer(gl.FRAMEBUFFER, xrSession.renderState.baseLayer.framebuffer);
-                const viewport = xrSession.renderState.baseLayer.getViewport(xrSession.renderState.views[0]);
-              renderer.setSize(viewport.width, viewport.height, false);
+    await SPLAT.Loader.LoadAsync(url, scene, (progress) => progressIndicator.value = progress * 100);
+    progressDialog.close();
+
+    arButton.addEventListener("click", enterAR);
+
+    if (navigator.xr) {
+        navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
+            if (supported) {
+                arButton.style.display = 'block'; // Show button if AR is supported
+            } else {
+                arButton.style.display = 'none'; // Hide if not supported
+                arMessage.style.display = 'block';
+                arMessage.textContent = "AR not supported on this device/browser.";
             }
-        };
+        });
+    } else {
+        arButton.style.display = 'none'; // Hide if WebXR API is not available
+        arMessage.style.display = 'block';
+        arMessage.textContent = "WebXR API not available.";
+    }
 
-        const frame = (time, xrFrame) => {
-          if(xrFrame) {
-              xrSession.requestAnimationFrame(frame);
-              const pose = xrFrame.getViewerPose(xrReferenceSpace);
-              if(pose) {
-                const view = pose.views[0];
-                const viewport = xrSession.renderState.baseLayer.getViewport(view);
-                renderer.setSize(viewport.width, viewport.height, false);
-                gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
-                camera.updateFromXR(view.transform.inverse.matrix, view.projectionMatrix);
+
+    const handleResize = () => {
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+    };
+
+    const frame = (time, xrFrame) => {
+        if (xrSession && xrFrame) {
+            const pose = xrFrame.getViewerPose(xrReferenceSpace);
+            if (pose) {
+                const viewport = xrSession.updateRenderState().baseLayer.getViewport(pose.views[0]);
+                renderer.setSize(viewport.width, viewport.height);
+
+                camera.projectionMatrix.fromArray(pose.views[0].projectionMatrix);
+                camera.matrixWorldInverse.fromArray(pose.views[0].transform.inverse.matrix);
+                camera.position.setFromMatrixPosition(camera.matrixWorldInverse);
+                camera.quaternion.setFromRotationMatrix(camera.matrixWorldInverse);
+                camera.updateMatrixWorld(true);
+
+
                 renderer.render(scene, camera);
-              }
+            }
+            xrSession.requestAnimationFrame(frame);
 
-          } else {
+        } else {
             controls.update();
             renderer.render(scene, camera);
             requestAnimationFrame(frame);
-          }
-        };
-
-        handleResize();
-        window.addEventListener("resize", handleResize);
-
-        requestAnimationFrame(frame);
-
-        setupAR();
-    }
-
-    async function setupAR() {
-        if ("xr" in navigator) {
-            navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
-                if (supported) {
-                    arButton.disabled = false;
-                } else {
-                    arButton.textContent = "AR not supported";
-                    arButton.disabled = true;
-                }
-            });
-
-            arButton.addEventListener("click", toggleAR);
-        } else {
-            arButton.textContent = "WebXR not found";
-            arButton.disabled = true;
         }
-    }
-
-    async function toggleAR() {
-        if (!xrSession) {
-             navigator.xr.requestSession('immersive-ar', {
-                 requiredFeatures: ['local', 'hit-test'], // Request hit-testing
-             }).then(async (session) => {
-              xrSession = session;
-              arButton.textContent = "Exit AR";
-
-              gl = renderer.getContext();
-              await gl.makeXRCompatible();
-              session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
-
-               // Set up the hit-test source
-              session.requestReferenceSpace('viewer').then((refSpace) => {
-                session.requestHitTestSource({ space: refSpace }).then((hitTestSource) => {
-                  // Store a reference to the hit test source, we'll use this later!
-                    renderer.xrHitTestSource = hitTestSource; //Very important for later.
-                });
-              });
-
-              session.requestReferenceSpace('local').then((refSpace) => {
-                  xrReferenceSpace = refSpace;
-                  xrSession.requestAnimationFrame(frame);
-              });
-
-                session.addEventListener("end", () => {
-                    xrSession = null;
-                    xrReferenceSpace = null;
-                    arButton.textContent = "Enter AR";
-                    gl = null;
-                     renderer.xrHitTestSource = null; //Clean the hit test.
-                    // Restore the canvas size.
-                    renderer.setSize(window.innerWidth, window.innerHeight);
-                    requestAnimationFrame(frame); //Back to the non-AR rendering loop.
-                });
-
-            });
-
-        } else {
-            xrSession.end();
-        }
-    }
-    
-    //Helper function to update camera from the XR data
-    SPLAT.Camera.prototype.updateFromXR = function (viewMat, projMat) {
-      this.viewMatrix.elements = viewMat;
-      this.projectionMatrix.elements = projMat;
-
-      this.position.setFromMatrixPosition(this.viewMatrix);
-      this.rotation.setFromRotationMatrix(this.viewMatrix);
-
-      this.updateMatrixWorld(true);
-      this.updateProjectionMatrix(); // Important to update the derived matrices
     };
 
+    handleResize();
+    window.addEventListener("resize", handleResize);
 
-    main();
+    requestAnimationFrame(frame);
+}
+
+async function enterAR() {
+    arButton.disabled = true;
+    arMessage.style.display = 'block';
+    arMessage.textContent = "Starting AR session...";
+
+    try {
+        xrSession = await navigator.xr.requestSession('immersive-ar', {
+            requiredFeatures: ['local-floor', 'viewer-positioning'] // 'local-floor' for floor detection, 'viewer-positioning' for stable tracking
+        });
+        xrSession.addEventListener('end', onXRSessionEnd);
+
+        xrReferenceSpace = await xrSession.requestReferenceSpace('local-floor'); // 'local-floor' for floor relative tracking
+
+        const gl = renderer.getContext();
+        await gl.makeXRCompatible();
+        xrSession.updateRenderState({ baseLayer: new XRWebGLLayer(xrSession, gl) });
+
+
+        arMessage.style.display = 'none';
+        arButton.style.display = 'none'; // Hide button when AR starts
+
+        // Start the AR frame loop
+        xrSession.requestAnimationFrame(frame);
+
+
+    } catch (error) {
+        console.error("Failed to start AR session", error);
+        arMessage.textContent = `AR session failed: ${error.message}`;
+        arButton.disabled = false; // Re-enable button on failure
+    }
+}
+
+function onXRSessionEnd() {
+    xrSession = null;
+    arButton.disabled = false; // Re-enable the AR button
+    arButton.style.display = 'block'; // Show AR button again
+    arMessage.style.display = 'none'; // Hide any AR messages
+    renderer.setSize(window.innerWidth, window.innerHeight); // Reset canvas size to window
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    requestAnimationFrame(frame); // Resume normal rendering loop
+}
+
+
+main();
+
   </script>
 </body>
 </html>
