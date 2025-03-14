@@ -1,129 +1,204 @@
 <!DOCTYPE html>
 <html>
-
-<html>
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>JSFiddle wdn6vasc</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>gsplat.js - Viewer Demo with AR</title>
 
-  <style>
-    body,
-html {
-    margin: 0;
-    padding: 0;
-    overflow: hidden;
-    background-color: #000;
-}
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+        }
 
-canvas {
-    width: 100vw;
-    height: 100vh;
-}
+        canvas {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
 
-dialog {
-    width: 100%;
-    text-align: center;
-    max-width: 20em;
-    color: white;
-    background-color: #000;
-    border: none;
-    position: relative;
-    transform: translate(-50%, -50%);
-}
+        dialog {
+            width: 100%;
+            text-align: center;
+            max-width: 20em;
+            color: white;
+            background-color: #000;
+            border: none;
+            position: relative;
+            transform: translate(-50%, -50%);
+        }
 
-#progress-container {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-}
+        #progress-container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+        }
 
-progress {
-    width: 100%;
-    height: 1em;
-    border: none;
-    background-color: #fff;
-    color: #eee;
-}
+        progress {
+            width: 100%;
+            height: 1em;
+            border: none;
+            background-color: #fff;
+            color: #eee;
+        }
 
-progress::-webkit-progress-bar {
-    background-color: #333;
-}
+        progress::-webkit-progress-bar {
+            background-color: #333;
+        }
 
-progress::-webkit-progress-value {
-    background-color: #eee;
-}
+        progress::-webkit-progress-value {
+            background-color: #eee;
+        }
 
-progress::-moz-progress-bar {
-    background-color: #eee;
-}
+        progress::-moz-progress-bar {
+            background-color: #eee;
+        }
 
-  </style>
+        #enter-ar-button, #exit-ar-button {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            z-index: 10;
+        }
 
-  
+        #exit-ar-button {
+            background-color: #f44336;
+            display: none;
+        }
+    </style>
 </head>
 <body>
-  <!doctype html>
-<html lang="en">
-    <head>
-        <meta charset="utf-8" />
-        <link rel="stylesheet" href="style.css" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>gsplat.js - Viewer Demo</title>
-    </head>
+    <div id="progress-container">
+        <dialog open id="progress-dialog">
+            <p>
+                <label for="progress-indicator">Loading scene...</label>
+            </p>
+            <progress max="100" id="progress-indicator"></progress>
+        </dialog>
+    </div>
 
-    <body>
-        <div id="progress-container">
-            <dialog open id="progress-dialog">
-                <p>
-                    <label for="progress-indicator">Loading scene...</label>
-                </p>
-                <progress max="100" id="progress-indicator"></progress>
-            </dialog>
-        </div>
-    
-        <canvas id="canvas"></canvas>
-    </body>
-</html>
+    <canvas id="canvas"></canvas>
+    <button id="enter-ar-button">Enter AR</button>
+    <button id="exit-ar-button">Exit AR</button>
 
+    <script type="module">
+        import * as SPLAT from "https://cdn.jsdelivr.net/npm/gsplat@latest";
+        import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.module.js';
 
-  <script type="module">
-    import * as SPLAT from "https://cdn.jsdelivr.net/npm/gsplat@latest";
+        const canvas = document.getElementById("canvas");
+        const progressDialog = document.getElementById("progress-dialog");
+        const progressIndicator = document.getElementById("progress-indicator");
+        const enterArButton = document.getElementById("enter-ar-button");
+        const exitArButton = document.getElementById("exit-ar-button");
 
-const canvas = document.getElementById("canvas");
-const progressDialog = document.getElementById("progress-dialog");
-const progressIndicator = document.getElementById("progress-indicator");
+        const renderer = new SPLAT.WebGLRenderer(canvas);
+        const scene = new SPLAT.Scene();
+        const camera = new SPLAT.Camera();
+        const controls = new SPLAT.OrbitControls(camera, canvas);
 
-const renderer = new SPLAT.WebGLRenderer(canvas);
-const scene = new SPLAT.Scene();
-const camera = new SPLAT.Camera();
-const controls = new SPLAT.OrbitControls(camera, canvas);
+        let xrSession = null;
+        let referenceSpace = null;
+        let hitTestSource = null;
 
-async function main() {
-    const url = "https://huggingface.co/cakewalk/splat-data/resolve/main/nike.splat";
+        async function main() {
+            const url = "https://huggingface.co/cakewalk/splat-data/resolve/main/nike.splat";
 
-    await SPLAT.Loader.LoadAsync(url, scene, (progress) => progressIndicator.value = progress * 100);
-    progressDialog.close();
+            await SPLAT.Loader.LoadAsync(url, scene, (progress) => progressIndicator.value = progress * 100);
+            progressDialog.close();
 
-    const handleResize = () => {
-        renderer.setSize(window.innerWidth, window.innerHeight);
-    };
+            const handleResize = () => {
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            };
 
-    const frame = () => {
-        controls.update();
-        renderer.render(scene, camera);
+            const frame = () => {
+                controls.update();
+                renderer.render(scene, camera);
+                requestAnimationFrame(frame);
+            };
 
-        requestAnimationFrame(frame);
-    };
+            handleResize();
+            window.addEventListener("resize", handleResize);
+            requestAnimationFrame(frame);
 
-    handleResize();
-    window.addEventListener("resize", handleResize);
+            enterArButton.addEventListener("click", enterAR);
+            exitArButton.addEventListener("click", exitAR);
+        }
 
-    requestAnimationFrame(frame);
-}
+        async function enterAR() {
+            if (navigator.xr) {
+                try {
+                    xrSession = await navigator.xr.requestSession('immersive-ar', {
+                        optionalFeatures: ['dom-overlay'],
+                        requiredFeatures: ['local', 'hit-test']
+                    });
 
-main();
+                    renderer.xr.enabled = true;
+                    renderer.xr.setSession(xrSession);
 
-  </script>
+                    referenceSpace = await xrSession.requestReferenceSpace('local');
+                    hitTestSource = await xrSession.requestHitTestSource({ space: referenceSpace });
+
+                    renderer.setAnimationLoop(renderArFrame);
+                    enterArButton.style.display = 'none';
+                    exitArButton.style.display = 'block';
+
+                } catch (error) {
+                    console.error("AR Session Error:", error);
+                }
+            } else {
+                console.error("WebXR not supported.");
+            }
+        }
+
+        function exitAR() {
+            if (xrSession) {
+                xrSession.end();
+                renderer.xr.enabled = false;
+                renderer.setAnimationLoop(null);
+                enterArButton.style.display = 'block';
+                exitArButton.style.display = 'none';
+                xrSession = null;
+                referenceSpace = null;
+                hitTestSource = null;
+                requestAnimationFrame(() => {
+                    controls.update();
+                    renderer.render(scene, camera);
+                });
+            }
+        }
+
+        function renderArFrame(time, frame) {
+            const xrFrame = frame;
+            const pose = xrFrame.getViewerPose(referenceSpace);
+
+            if (pose) {
+                const view = pose.views[0];
+                const viewport = renderer.xr.getViewport(view);
+
+                camera.projectionMatrix.fromArray(view.projectionMatrix);
+                camera.matrix.fromArray(pose.transform.matrix);
+                camera.matrix.decompose(camera.position, camera.quaternion, camera.scale);
+
+                const hitTestResults = xrFrame.getHitTestResults(hitTestSource);
+                if (hitTestResults.length > 0) {
+                    const hitPose = hitTestResults[0].getPose(referenceSpace);
+                    scene.position.fromArray(hitPose.transform.matrix.slice(12,15))
+                    scene.quaternion.fromArray(hitPose.transform.matrix.slice(0,4));
+                }
+
+                renderer.render(scene, camera);
+            }
+        }
+
+        main();
+    </script>
 </body>
 </html>
