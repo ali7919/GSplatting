@@ -1,129 +1,318 @@
-<!DOCTYPE html>
-<html>
-
+<!doctype html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>JSFiddle wdn6vasc</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>gsplat.js - AR Demo</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+            height: 100%;
+            width: 100%;
+        }
 
-  <style>
-    body,
-html {
-    margin: 0;
-    padding: 0;
-    overflow: hidden;
-    background-color: #000;
-}
+        canvas {
+            /* Canvas might be hidden or overlaid depending on AR state */
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: block; /* Ensure it's visible initially */
+        }
 
-canvas {
-    width: 100vw;
-    height: 100vh;
-}
+        dialog {
+            width: 90%;
+            max-width: 20em;
+            color: white;
+            background-color: rgba(0, 0, 0, 0.7);
+            border: 1px solid #555;
+            border-radius: 5px;
+            position: absolute; /* Changed for better centering */
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 10;
+        }
 
-dialog {
-    width: 100%;
-    text-align: center;
-    max-width: 20em;
-    color: white;
-    background-color: #000;
-    border: none;
-    position: relative;
-    transform: translate(-50%, -50%);
-}
+        #progress-container {
+            /* Container no longer needed with absolute positioning on dialog */
+        }
 
-#progress-container {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-}
+        progress {
+            width: 100%;
+            height: 1em;
+            border: none;
+            background-color: #fff;
+            color: #eee;
+            margin-top: 0.5em;
+        }
 
-progress {
-    width: 100%;
-    height: 1em;
-    border: none;
-    background-color: #fff;
-    color: #eee;
-}
+        progress::-webkit-progress-bar { background-color: #333; }
+        progress::-webkit-progress-value { background-color: #eee; }
+        progress::-moz-progress-bar { background-color: #eee; }
 
-progress::-webkit-progress-bar {
-    background-color: #333;
-}
+        #ar-button {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 20px;
+            font-size: 16px;
+            background-color: #444;
+            color: white;
+            border: 1px solid #666;
+            border-radius: 5px;
+            cursor: pointer;
+            z-index: 5;
+            display: none; /* Hidden until WebXR support confirmed */
+        }
+        #ar-button:hover { background-color: #555; }
+        #ar-button:disabled { background-color: #222; color: #777; cursor: not-allowed;}
 
-progress::-webkit-progress-value {
-    background-color: #eee;
-}
-
-progress::-moz-progress-bar {
-    background-color: #eee;
-}
-
-  </style>
-
-  
+    </style>
 </head>
 <body>
-  <!doctype html>
-<html lang="en">
-    <head>
-        <meta charset="utf-8" />
-        <link rel="stylesheet" href="style.css" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>gsplat.js - Viewer Demo</title>
-    </head>
+    <dialog open id="progress-dialog">
+        <p><label for="progress-indicator">Loading scene...</label></p>
+        <progress max="100" value="0" id="progress-indicator"></progress>
+    </dialog>
 
-    <body>
-        <div id="progress-container">
-            <dialog open id="progress-dialog">
-                <p>
-                    <label for="progress-indicator">Loading scene...</label>
-                </p>
-                <progress max="100" id="progress-indicator"></progress>
-            </dialog>
-        </div>
-    
-        <canvas id="canvas"></canvas>
-    </body>
-</html>
+    <canvas id="canvas"></canvas>
+    <button id="ar-button">Enter AR</button>
+
+    <script type="module">
+        import * as SPLAT from "https://cdn.jsdelivr.net/npm/gsplat@latest";
+
+        const canvas = document.getElementById("canvas");
+        const progressDialog = document.getElementById("progress-dialog");
+        const progressIndicator = document.getElementById("progress-indicator");
+        const arButton = document.getElementById("ar-button");
+
+        // --- WebXR Variables ---
+        let xrSession = null;
+        let xrRefSpace = null;
+        let gl = null; // WebGL context
+        let xrGlLayer = null;
+        let frameId = null; // To cancel requestAnimationFrame
+
+        // --- gsplat.js Variables ---
+        // Initialize renderer with alpha for potential compositing in AR
+        const renderer = new SPLAT.WebGLRenderer(canvas, { alpha: true });
+        const scene = new SPLAT.Scene();
+        const camera = new SPLAT.Camera();
+        // Controls only used when NOT in AR
+        const controls = new SPLAT.OrbitControls(camera, canvas);
+        controls.enable = true; // Start enabled
+
+        async function main() {
+            // Check for WebXR support
+            if (navigator.xr) {
+                try {
+                    const supported = await navigator.xr.isSessionSupported('immersive-ar');
+                    if (supported) {
+                        arButton.style.display = 'block';
+                        arButton.addEventListener('click', onArButtonClick);
+                    } else {
+                        console.log("Immersive AR not supported on this device.");
+                        showArNotSupported();
+                    }
+                } catch (e) {
+                    console.error("Error checking AR support:", e);
+                    showArNotSupported();
+                }
+            } else {
+                console.log("WebXR API not available.");
+                showArNotSupported();
+            }
+
+            // Load the model
+            const url = "https://huggingface.co/cakewalk/splat-data/resolve/main/nike.splat";
+            try {
+                await SPLAT.Loader.LoadAsync(url, scene, (progress) => {
+                    progressIndicator.value = progress * 100;
+                });
+                progressDialog.close();
+                console.log("Scene loaded.");
+            } catch (e) {
+                console.error("Failed to load splat file:", e);
+                progressDialog.innerText = "Error loading model.";
+                return; // Stop if loading fails
+            }
+
+            // Initial setup for non-AR view
+            handleResize();
+            window.addEventListener("resize", handleResize);
+
+            // Start the non-AR render loop
+            startNonArRenderLoop();
+        }
+
+        function showArNotSupported() {
+             // Optionally inform the user more visibly
+             arButton.style.display = 'block';
+             arButton.innerText = "AR Not Supported";
+             arButton.disabled = true;
+        }
+
+        function handleResize() {
+            // Only resize canvas if not in AR, as WebXR manages viewport size
+            if (!xrSession) {
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                 // Update camera aspect ratio for non-AR view
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix(); // Assuming gsplat.js Camera has this method like three.js
+            }
+        }
+
+        // --- Standard Render Loop ---
+        function renderNonAr() {
+            if (xrSession) return; // Stop if AR session starts
+
+            if (controls.enable) {
+                controls.update();
+            }
+            renderer.render(scene, camera);
+            frameId = requestAnimationFrame(renderNonAr);
+        }
+
+        function startNonArRenderLoop() {
+             if (frameId) cancelAnimationFrame(frameId); // Cancel previous loop if any
+             controls.enable = true;
+             renderNonAr();
+        }
+
+         function stopNonArRenderLoop() {
+             if (frameId) {
+                 cancelAnimationFrame(frameId);
+                 frameId = null;
+             }
+             controls.enable = false;
+         }
+
+        // --- WebXR Functions ---
+        async function onArButtonClick() {
+            if (xrSession) {
+                // If already in a session, request to end it
+                await xrSession.end();
+                // xrSession.onend handles cleanup
+            } else {
+                // Request a new AR session
+                try {
+                    // We need access to the WebGL context for the XR session
+                    gl = renderer.gl; // Get context from gsplat renderer
+
+                    // Request session with DOM overlay to keep button visible? Maybe not needed yet.
+                    // 'local-floor' is often good for placing objects on detected surfaces.
+                    // 'viewer' keeps origin relative to device start pose. Let's start with 'local' or 'local-floor'.
+                    xrSession = await navigator.xr.requestSession('immersive-ar', {
+                        requiredFeatures: ['local-floor'], // or 'local'
+                        // optionalFeatures: ['dom-overlay'],
+                        // domOverlay: { root: document.body }
+                    });
+
+                    xrSession.addEventListener('end', onXrSessionEnd);
+
+                    // Create a WebGL layer for the session
+                    // We need to make sure gsplat's renderer uses this context
+                    await gl.makeXRCompatible(); // Important step!
+
+                    xrGlLayer = new XRWebGLLayer(xrSession, gl);
+                    xrSession.updateRenderState({ baseLayer: xrGlLayer });
+
+                    // Get reference space
+                    xrRefSpace = await xrSession.requestReferenceSpace('local-floor'); // or 'local'
+
+                    // Stop standard rendering and start AR rendering
+                    stopNonArRenderLoop();
+                    xrSession.requestAnimationFrame(onXrFrame);
+
+                    arButton.innerText = "Exit AR";
+
+                } catch (e) {
+                    console.error("Failed to start AR session:", e);
+                    // Ensure cleanup if session partially started
+                    if (xrSession) await xrSession.end().catch(err => console.error("Error ending session after failure:", err));
+                    xrSession = null;
+                    gl = null; // Reset context if it was assigned
+                    arButton.innerText = "Enter AR";
+                    startNonArRenderLoop(); // Go back to normal view
+                }
+            }
+        }
+
+        function onXrSessionEnd() {
+            console.log("AR Session Ended");
+            xrSession = null;
+            xrRefSpace = null;
+            xrGlLayer = null;
+            gl = null; // Context is managed by gsplat renderer, maybe don't null it? Or re-init renderer? Let's keep it for now.
+
+            arButton.innerText = "Enter AR";
+
+             // Important: Restore renderer state if needed (like default framebuffer)
+            // Usually binding framebuffer 0 restores drawing to the canvas
+            renderer.gl.bindFramebuffer(renderer.gl.FRAMEBUFFER, null);
 
 
-  <script type="module">
-    import * as SPLAT from "https://cdn.jsdelivr.net/npm/gsplat@latest";
+            // Restart the non-AR render loop
+            handleResize(); // Ensure canvas size/aspect is correct
+            startNonArRenderLoop();
+        }
 
-const canvas = document.getElementById("canvas");
-const progressDialog = document.getElementById("progress-dialog");
-const progressIndicator = document.getElementById("progress-indicator");
+        // --- WebXR Render Loop ---
+        function onXrFrame(time, frame) {
+            if (!xrSession) return; // Exit if session ended unexpectedly
 
-const renderer = new SPLAT.WebGLRenderer(canvas);
-const scene = new SPLAT.Scene();
-const camera = new SPLAT.Camera();
-const controls = new SPLAT.OrbitControls(camera, canvas);
+            // Request next frame
+            xrSession.requestAnimationFrame(onXrFrame);
 
-async function main() {
-    const url = "https://huggingface.co/cakewalk/splat-data/resolve/main/nike.splat";
+            const pose = frame.getViewerPose(xrRefSpace);
+            if (!pose) {
+                console.warn("Could not get viewer pose.");
+                return;
+            }
 
-    await SPLAT.Loader.LoadAsync(url, scene, (progress) => progressIndicator.value = progress * 100);
-    progressDialog.close();
+            const glLayer = xrSession.renderState.baseLayer;
 
-    const handleResize = () => {
-        renderer.setSize(window.innerWidth, window.innerHeight);
-    };
+            // Bind the WebXR framebuffer
+            renderer.gl.bindFramebuffer(renderer.gl.FRAMEBUFFER, glLayer.framebuffer);
+            // Important: Clear the framebuffer (alpha might be needed for compositing)
+            renderer.gl.clearColor(0, 0, 0, 0); // Clear with transparent black
+            renderer.gl.clear(renderer.gl.COLOR_BUFFER_BIT | renderer.gl.DEPTH_BUFFER_BIT);
 
-    const frame = () => {
-        controls.update();
-        renderer.render(scene, camera);
 
-        requestAnimationFrame(frame);
-    };
+            // Render for each eye (view)
+            for (const view of pose.views) {
+                const viewport = glLayer.getViewport(view);
+                renderer.gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
 
-    handleResize();
-    window.addEventListener("resize", handleResize);
+                // Update gsplat camera matrices
+                // Convert WebXR matrices (Float32Array) to gsplat format if needed.
+                // Assuming gsplat.js camera uses matrices similar to Three.js:
+                camera.projectionMatrix.fromArray(view.projectionMatrix);
+                camera.matrixWorldInverse.fromArray(view.transform.inverse.matrix);
+                // If gsplat.js Camera doesn't use matrixWorldInverse directly, you might need:
+                // camera.matrixWorld.fromArray(view.transform.matrix); // And ensure inverse is calculated or not needed by renderer
 
-    requestAnimationFrame(frame);
-}
+                // Render the scene for this view
+                // Pass the updated camera to the renderer
+                renderer.render(scene, camera);
+            }
 
-main();
+            // It's important to unbind the XR framebuffer if the renderer
+            // doesn't manage this internally, BEFORE yielding back to the browser.
+            // However, since the next frame will bind it again, it might not be strictly necessary.
+            // renderer.gl.bindFramebuffer(renderer.gl.FRAMEBUFFER, null); // Optional cleanup? Check performance.
+        }
 
-  </script>
+        // --- Start ---
+        main();
+
+    </script>
 </body>
 </html>
