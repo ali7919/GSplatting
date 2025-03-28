@@ -1,196 +1,129 @@
 <!DOCTYPE html>
 <html>
+
+<html>
 <head>
-    <meta charset="utf-8">
-    <title>Gaussian Splat AR Viewer</title>
-    <meta name="description" content="View a 3D Gaussian Splat file in AR using A-Frame.">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JSFiddle wdn6vasc</title>
 
-    <!-- A-Frame Core -->
-    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <style>
+    body,
+html {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background-color: #000;
+}
 
-    <!-- A-Frame Gaussian Splatting Component (ensure you use a reliable/latest version) -->
-    <script src="https://unpkg.com/aframe-gaussian-splatting@0.2.1/dist/aframe-gaussian-splatting.umd.min.js"></script>
+canvas {
+    width: 100vw;
+    height: 100vh;
+}
 
-    <!-- A-Frame AR Hit Test Component -->
-    <script src="https://cdn.jsdelivr.net/npm/aframe-ar-hit-test-component@latest/dist/aframe-ar-hit-test-component.min.js"></script>
+dialog {
+    width: 100%;
+    text-align: center;
+    max-width: 20em;
+    color: white;
+    background-color: #000;
+    border: none;
+    position: relative;
+    transform: translate(-50%, -50%);
+}
 
-    <style>
-        /* Basic overlay styles */
-        #overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            padding: 10px;
-            background-color: rgba(0, 0, 0, 0.5);
-            color: white;
-            font-family: sans-serif;
-            text-align: center;
-            z-index: 10;
-            display: none; /* Hidden by default */
-        }
-        /* Hide default A-Frame loading UI if desired */
-        .a-loader-title {
-             /* display: none !important; */
-        }
-        body {
-            margin: 0;
-            overflow: hidden; /* Prevent scrolling */
-        }
-        a-scene {
-            height: 100vh;
-            width: 100vw;
-        }
-    </style>
+#progress-container {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+}
+
+progress {
+    width: 100%;
+    height: 1em;
+    border: none;
+    background-color: #fff;
+    color: #eee;
+}
+
+progress::-webkit-progress-bar {
+    background-color: #333;
+}
+
+progress::-webkit-progress-value {
+    background-color: #eee;
+}
+
+progress::-moz-progress-bar {
+    background-color: #eee;
+}
+
+  </style>
+
+  
 </head>
-
 <body>
-    <!-- Instructions Overlay -->
-    <div id="overlay">
-        <p>Look around to find a flat surface, then tap the screen to place the object.</p>
-    </div>
+  <!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <link rel="stylesheet" href="style.css" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>gsplat.js - Viewer Demo</title>
+    </head>
 
-    <!-- A-Frame Scene Setup for AR -->
-    <a-scene
-        webxr="
-            requiredFeatures: hit-test,local-floor;
-            optionalFeatures: dom-overlay,light-estimation;
-            overlayElement: #overlay;"
-        ar-hit-test="target: #reticle; type:footprint; footprintDepth: 0.1"
-        renderer="antialias: true; colorManagement: true;"
-        ar-init> <!-- Custom component to handle AR state -->
+    <body>
+        <div id="progress-container">
+            <dialog open id="progress-dialog">
+                <p>
+                    <label for="progress-indicator">Loading scene...</label>
+                </p>
+                <progress max="100" id="progress-indicator"></progress>
+            </dialog>
+        </div>
+    
+        <canvas id="canvas"></canvas>
+    </body>
+</html>
 
-        <!-- Camera Rig -->
-        <a-camera position="0 1.6 0"></a-camera>
 
-        <!-- Reticle: Visual indicator for the hit test target -->
-        <a-entity id="reticle"
-            geometry="primitive: ring; radiusInner: 0.015; radiusOuter: 0.025"
-            material="color: white; shader: flat; transparent: true; opacity: 0.7"
-            position="0 0 -0.5"
-            rotation="-90 0 0"
-            visible="false">
-        </a-entity>
+  <script type="module">
+    import * as SPLAT from "https://cdn.jsdelivr.net/npm/gsplat@latest";
 
-        <!-- The Gaussian Splat Object -->
-        <!-- Starts hidden and far away, will be positioned by hit-testing -->
-        <a-entity
-            id="splat-object"
-            gaussian-splatting="
-                src: https://huggingface.co/cakewalk/splat-data/resolve/main/nike.splat;
-                alphaTest: 0.05;
-                splatSize: 500.0;
-                "
-            position="0 -100 0"  /* Start offscreen */
-            scale="1 1 1"      /* Adjust scale as needed */
-            visible="false"
-            shadow="cast: false; receive: false"> /* Splats typically don't interact well with standard shadows */
-        </a-entity>
+const canvas = document.getElementById("canvas");
+const progressDialog = document.getElementById("progress-dialog");
+const progressIndicator = document.getElementById("progress-indicator");
 
-        <!-- Basic Lighting -->
-        <a-light type="ambient" color="#BBB"></a-light>
-        <a-light type="directional" position="-1 2 1" intensity="0.8"></a-light>
+const renderer = new SPLAT.WebGLRenderer(canvas);
+const scene = new SPLAT.Scene();
+const camera = new SPLAT.Camera();
+const controls = new SPLAT.OrbitControls(camera, canvas);
 
-    </a-scene>
+async function main() {
+    const url = "https://huggingface.co/cakewalk/splat-data/resolve/main/nike.splat";
 
-    <script>
-        AFRAME.registerComponent('ar-init', {
-            init: function () {
-                const sceneEl = this.el;
-                const overlay = document.getElementById('overlay');
-                const reticle = document.getElementById('reticle');
-                const splatObject = document.getElementById('splat-object');
-                let hasPlaced = false;
+    await SPLAT.Loader.LoadAsync(url, scene, (progress) => progressIndicator.value = progress * 100);
+    progressDialog.close();
 
-                // --- AR Session Event Listeners ---
+    const handleResize = () => {
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    };
 
-                sceneEl.addEventListener('enter-vr', () => {
-                    if (sceneEl.is('ar-mode')) {
-                        console.log("Entered AR Mode");
-                        // Show instructions when AR starts
-                        overlay.style.display = 'block';
-                        reticle.setAttribute('visible', false); // Hide reticle initially
-                        // Reset placement state if re-entering AR
-                        hasPlaced = false;
-                        splatObject.setAttribute('visible', 'false');
-                        splatObject.setAttribute('position', '0 -100 0'); // Ensure it's hidden
-                    }
-                });
+    const frame = () => {
+        controls.update();
+        renderer.render(scene, camera);
 
-                sceneEl.addEventListener('exit-vr', () => {
-                    console.log("Exited AR/VR Mode");
-                    // Hide overlay and reticle when leaving AR/VR
-                    overlay.style.display = 'none';
-                    reticle.setAttribute('visible', 'false');
-                    splatObject.setAttribute('visible', 'false'); // Hide object when exiting
-                });
+        requestAnimationFrame(frame);
+    };
 
-                // --- Hit Test Event Listeners ---
+    handleResize();
+    window.addEventListener("resize", handleResize);
 
-                // Fired when hit test starts searching
-                sceneEl.addEventListener('ar-hit-test-start', () => {
-                    console.log('Hit testing started.');
-                    // Optionally show a different indicator or message
-                });
+    requestAnimationFrame(frame);
+}
 
-                // Fired repeatedly while a valid surface is found
-                sceneEl.addEventListener('ar-hit-test-achieved', () => {
-                    console.log('Hit test surface found.');
-                    if (!hasPlaced) {
-                        reticle.setAttribute('visible', true); // Show reticle when surface found and not placed yet
-                    }
-                });
+main();
 
-                // Fired when the hit test loses the surface
-                sceneEl.addEventListener('ar-hit-test-lost', () => {
-                    console.log('Hit test surface lost.');
-                    reticle.setAttribute('visible', false); // Hide reticle if surface is lost
-                });
-
-                // --- Placement Logic ---
-
-                // Fired when the user taps the screen while hit test is active
-                sceneEl.addEventListener('ar-hit-test-select', () => {
-                    console.log('AR Hit Test Select (Tap) Detected.');
-                    if (reticle.getAttribute('visible') && splatObject) {
-                        // Get the position from the reticle (which is updated by ar-hit-test)
-                        const position = reticle.getAttribute('position');
-                        console.log('Placing object at:', position);
-
-                        // Set the splat object's position and make it visible
-                        splatObject.setAttribute('position', position);
-                        splatObject.setAttribute('visible', 'true');
-
-                        // Optionally: Hide reticle and instructions after placing
-                        reticle.setAttribute('visible', false);
-                        overlay.style.display = 'none';
-                        hasPlaced = true; // Mark as placed
-
-                        // Optional: Emit an event if needed elsewhere
-                        // sceneEl.emit('object-placed', { position: position });
-                    } else {
-                        console.log("Tap ignored - reticle not visible (no surface found?) or object missing.");
-                    }
-                });
-
-                // --- Splat Loading Events (Optional) ---
-                 if (splatObject) {
-                    splatObject.addEventListener('model-loaded', (e) => {
-                         console.log('Gaussian Splat model loaded successfully!');
-                         // You could hide a loading indicator here
-                     });
-                     splatObject.addEventListener('model-error', (e) => {
-                         console.error('Error loading Gaussian Splat model:', e.detail);
-                         overlay.innerHTML = "<p>Error loading 3D model. Please check the URL and network connection.</p>";
-                         overlay.style.display = 'block';
-                     });
-                 } else {
-                     console.error("Could not find splat object entity!");
-                 }
-            }
-        });
-    </script>
-
+  </script>
 </body>
 </html>
